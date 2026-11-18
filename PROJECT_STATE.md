@@ -1,6 +1,6 @@
 # Repd Project State
 
-Milestone 1 checkpoint — 2026-11-17
+Milestone 2 checkpoint — 2026-11-17
 
 ## 1. Product vision and UX principles
 
@@ -9,6 +9,7 @@ Repd is an AI-native business manager for independent commercial creatives. It s
 Current UX principles:
 
 - Agent-first and structured-interface-first; there is no generic chatbot.
+- Users review decisions and prepared work by default, not database fields.
 - Prepared drafts and decisions instead of generic tasks.
 - Read-first living briefs with explicit edit mode.
 - Contextual action workspaces for communication, scheduling, finance, and review.
@@ -52,10 +53,13 @@ Implemented:
 - Reusable people, organizations, affiliations, job roles, archive behavior, and shared-job history.
 - First/second holds, confirmed bookings, release/conversion history, conflicts, month/agenda calendar.
 - Durable actions with deduplication, resolution conditions, approval/execution separation, and events.
-- Pasted inquiry and producer-response sources, structured extraction, review/correction/rejection, and deliberate merge.
+- Pasted inquiry and producer-response sources, structured business briefing, optional correction/rejection, and deliberate merge.
+- Opportunity summaries, producer requests, relevant gaps, grounded risks, prioritized recommendations, suggested workflow state, and prepared responses in one validated intake result.
+- Explicit requested-date alternatives and hold-request intent. Alternative dates do not become ranges; requested holds do not become active holds.
 - Accepted source-backed field revisions and contextual requirements.
 - Prepared producer emails with editing, AI revision, approval, copy/`mailto:`, explicit sent confirmation, and question tracking.
 - Specialized hold-conflict and invoice-preparation workspaces.
+- Editable internal invoice previews with billing details, line item, payment terms, and notes.
 - Grounded daily briefing and read-first living job briefs.
 
 Limits:
@@ -100,9 +104,9 @@ OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-6.2-astra
 ```
 
-`OpenAIProvider` calls `responses.parse` with Zod structured-output schemas, `store: false`, two SDK retries, and a 45-second timeout. Tracked runs persist purpose, provider/model, schema version, request ID, duration, input hash, output, and failures.
+`OpenAIProvider` calls `responses.parse` with Zod structured-output schemas, `store: false`, two SDK retries, and a 45-second timeout. Inquiry analysis now returns the briefing and source-backed extraction together so the prepared response and recommendation use the same grounded understanding. Tracked runs persist purpose, provider/model, schema version, request ID, duration, input hash, output, and failures.
 
-AI currently supports inquiry/response extraction, missing-information analysis, producer email drafting, and draft revision. Candidate scoring, requirement classification, conflicts, action resolution, authorization, and persistence decisions remain deterministic.
+AI currently supports opportunity/update briefings, source-backed extraction, missing-information analysis, producer email drafting, and draft revision. Candidate scoring, requirement classification, conflicts, hold creation, action resolution, authorization, and persistence decisions remain deterministic.
 
 Automated tests use `FixtureAIProvider` only when `AI_FIXTURE_MODE=test` and the process is non-production or explicitly marked `PLAYWRIGHT_TEST=true`. Missing credentials never activate the fixture in normal use.
 
@@ -112,6 +116,7 @@ Automated tests use `FixtureAIProvider` only when `AI_FIXTURE_MODE=test` and the
 - PGlite is the only wired runtime database client; hosted PostgreSQL is deferred.
 - RLS transaction context is not active under the local owner connection.
 - Rejected extracted fields do not receive standalone rejected revision records.
+- Requested-date alternatives are preserved in the provenance layer rather than a dedicated normalized scheduling-request table.
 - Source immutability is conventional, not database-enforced.
 - Supersession fields exist without a complete supersede workflow.
 - Workspace action reevaluation is a full scan.

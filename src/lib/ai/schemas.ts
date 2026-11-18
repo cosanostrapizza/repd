@@ -16,6 +16,47 @@ const extractedValue = <T extends z.ZodTypeAny>(value: T) =>
 export const inquiryExtractionSchema = z.object({
   isJobInquiry: z.boolean(),
   summary: z.string(),
+  assessment: z.string(),
+  producerRequests: z.array(z.string()),
+  missingInformation: z.array(
+    z.object({
+      fieldKey: z.string(),
+      label: z.string(),
+      reason: z.string(),
+      askExternalParty: z.boolean(),
+      suggestedQuestion: z.string().nullable(),
+    }),
+  ),
+  risks: z.array(z.string()),
+  recommendations: z.array(z.string()),
+  suggestedNextWorkflowState: z.enum([
+    "review_opportunity",
+    "check_availability",
+    "clarify_terms",
+    "review_update",
+    "ready_to_confirm",
+  ]),
+  preparedResponse: z.object({
+    subject: z.string(),
+    body: z.string(),
+    tone: z.enum(["warm", "direct", "concise"]),
+  }),
+  requestedDates: z.array(
+    z.object({
+      label: z.string(),
+      start: z.string().nullable(),
+      end: z.string().nullable(),
+      relationship: z.enum(["single", "alternative", "range"]),
+      confidence: z.number().min(0).max(1),
+      evidence: evidenceSchema.nullable(),
+    }),
+  ),
+  holdRequest: z.object({
+    requested: z.boolean(),
+    kind: z.enum(["first", "second", "unspecified"]).nullable(),
+    dates: z.array(z.string()),
+    evidence: evidenceSchema.nullable(),
+  }),
   jobTitle: extractedValue(z.string()),
   jobType: extractedValue(
     z.enum(["commercial", "editorial", "portrait", "event", "other"]),

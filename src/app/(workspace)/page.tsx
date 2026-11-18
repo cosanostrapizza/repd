@@ -3,7 +3,7 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { ArrowRight, BriefcaseBusiness, Plus } from "lucide-react";
 import { ActionList } from "@/components/action-list";
 import { db } from "@/db/client";
-import { actions, activities, jobs } from "@/db/schema";
+import { actions, activities, jobs, questions } from "@/db/schema";
 import { reevaluateWorkspace } from "@/lib/action-engine";
 import { requireContext } from "@/lib/auth";
 import { bookingLabels, nextNeed } from "@/lib/domain";
@@ -25,7 +25,7 @@ function groundedSentence(
 export default async function HomePage() {
   const ctx = await requireContext();
   await reevaluateWorkspace(ctx.workspaceId);
-  const [actionRows, activeJobs, recent] = await Promise.all([
+  const [actionRows, activeJobs, recent, waiting] = await Promise.all([
     db
       .select({ action: actions, jobTitle: jobs.title })
       .from(actions)
@@ -55,6 +55,19 @@ export default async function HomePage() {
       .where(eq(activities.workspaceId, ctx.workspaceId))
       .orderBy(desc(activities.createdAt))
       .limit(5),
+    db
+      .select({ question: questions, jobTitle: jobs.title })
+      .from(questions)
+      .innerJoin(jobs, eq(questions.jobId, jobs.id))
+      .where(
+        and(
+          eq(questions.workspaceId, ctx.workspaceId),
+          eq(questions.status, "asked"),
+          eq(jobs.workspaceId, ctx.workspaceId),
+        ),
+      )
+      .orderBy(desc(questions.askedAt))
+      .limit(4),
   ]);
   const first = ctx.user.name.split(" ")[0];
   const lead = actionRows
@@ -72,7 +85,9 @@ export default async function HomePage() {
           </h1>
           <p>
             {lead ||
-              "Your active work is in order. I’ll surface the next meaningful decision when the underlying facts change."}
+              (activeJobs.length
+                ? "No prepared decision is waiting right now. I’m monitoring the active briefs and will surface a concrete next move when stored facts change."
+                : "There is no active work yet. Add an inquiry and I’ll turn the source into a decision-ready brief.")}
           </p>
         </div>
         <Link href="/inquiries/new" className="button accent">
@@ -129,6 +144,31 @@ export default async function HomePage() {
           </section>
         </main>
         <aside>
+          {waiting.length > 0 && (
+            <section className="section">
+              <div className="section-title">
+                <div>
+                  <p className="eyebrow">Waiting on</p>
+                  <h2>Producer replies</h2>
+                </div>
+              </div>
+              <div className="card">
+                {waiting.map(({ question, jobTitle }) => (
+                  <Link
+                    href={`/jobs/${question.jobId}`}
+                    className="radar-job"
+                    key={question.id}
+                  >
+                    <div>
+                      <h3>{jobTitle}</h3>
+                      <p>{question.question}</p>
+                    </div>
+                    <span>Asked →</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="section">
             <div className="section-title">
               <div>

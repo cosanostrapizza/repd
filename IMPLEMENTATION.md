@@ -1,9 +1,25 @@
 # Repd Implementation Checkpoint
 
 Last updated: 2026-11-17
-Checkpoint: Milestone 1 complete
+Checkpoint: Milestone 2 complete
 
-The product brief remains at `docs/repd-mvp-product-brief.md`. This file records what is implemented at the Milestone 1 checkpoint, the decisions that shape the code, verification results, and current limitations. It does not describe future work as shipped.
+The product brief remains at `docs/repd-mvp-product-brief.md` for product vision and domain context. The Milestone 2 redesign supersedes conflicting interaction specifications: intake is briefing-first, job pages are living business briefs, and actions use purpose-built workspaces. This file preserves the original Milestone 1 history below and records the Milestone 2 evolution without retroactively redefining that checkpoint.
+
+## Milestone 2 product evolution
+
+- Replaced mandatory field-by-field inquiry acceptance with a structured opportunity briefing: understanding, opportunity facts, assessment, prioritized next moves, and an editable prepared response.
+- Moved fields, confidence, exact evidence, corrections, rejected interpretations, and match selection into optional progressive disclosure.
+- Extended the validated inquiry output with producer requests, relevant missing information, risks, recommendations, a suggested workflow state, requested-date semantics, hold-request intent, and a response draft.
+- Enforced the distinction between extraction acceptance and business confirmation. A requested first/second hold is persisted as unconfirmed request intent and deterministically remains `unbooked`; date alternatives remain separate and do not populate a continuous shoot range.
+- Persisted briefing analysis, source-backed request revisions, accepted-update activity, durable questions, actions, and communications so reloads retain the workflow.
+- Reworked response reconciliation around a coherent summary and changed facts, with granular correction remaining optional.
+- Reordered Job Detail around the current situation and prepared decisions. Alternative requested dates appear in the living brief without being represented as confirmed shoot dates.
+- Added a truthful Home “Waiting on” section for asked producer questions and removed unsupported “everything is on track” language.
+- Retained the specialized producer and hold workspaces and expanded invoice preparation into an editable internal preview. Saving a draft does not issue or send an invoice.
+
+## Milestone history
+
+Milestone 1 established the functional local foundation described in the shipped increments below. Those increments remain historically accurate and continue to underpin Milestone 2.
 
 ## Shipped increments
 
@@ -47,13 +63,13 @@ The product brief remains at `docs/repd-mvp-product-brief.md`. This file records
 - Specialized UI dispatch for producer coordination, hold conflicts, invoice preparation, and fallback review actions.
 - Producer coordination resolves when referenced questions are answered or obsolete; deterministic actions resolve when their underlying condition disappears.
 
-### 7. AI-native inquiry and coordination workflow
+### 7. AI-native inquiry and coordination workflow (Milestone 1 foundation)
 
 - Immutable-by-convention pasted sources stored before model execution with a content hash and source metadata.
 - Intake review states for new job, job update, and producer response flows.
 - OpenAI Responses API adapter with structured Zod parsing, configurable model, two SDK retries, 45-second timeout, and server-only credentials.
 - Tracked model runs with provider, model, purpose, schema version, request ID, input hash, output or failure, duration, and timestamps.
-- Extraction review with evidence, confidence, visible conflicts, correction, per-field rejection, and deliberate create/merge choice.
+- Source-backed extraction with evidence, confidence, visible conflicts, correction, per-field rejection, and deliberate create/merge choice. Milestone 2 retains these capabilities behind progressive disclosure instead of making them the default gate.
 - Accepted field revisions and contextual requirements for shoot date, commercial usage, location, fee, and payment terms.
 - Durable questions, prepared producer email, editing, model-assisted revision/tone change, approval, copy/`mailto:` handoff, explicit sent confirmation, and pasted-response reconciliation.
 
@@ -77,12 +93,12 @@ The product brief remains at `docs/repd-mvp-product-brief.md`. This file records
 
 ## Verification record
 
-Verified at the checkpoint:
+Verified for the Milestone 2 checkpoint:
 
 - `pnpm typecheck` — passed.
 - `pnpm lint` — passed without warnings.
 - `pnpm test` — 16 tests passed across six files, including structured-output validation, requirement policy, schema invariants, database migrations, approval/execution separation, workspace scoping, and database URL normalization.
-- `pnpm test:e2e` — 12 journeys passed across desktop and mobile Chromium, including authentication, cross-workspace denial, inquiry review, producer email approval semantics, producer response reconciliation, living-brief editing, and scheduling conflicts.
+- `pnpm test:e2e` — 12 journeys passed across desktop and mobile Chromium, including authentication, cross-workspace denial, the Adidas alternative-date/hold-request briefing, one-click creation, missing producer email, producer email approval semantics, coherent response reconciliation, living-brief editing, and scheduling conflicts.
 - `pnpm build` — optimized production build passed.
 - `pnpm db:migrate` — forward migrations were current and idempotent against the preserved local database.
 - The exact `DATABASE_URL=file:./.repd/repd.db` form was verified after URL normalization was added.
@@ -95,6 +111,7 @@ Live OpenAI execution is implemented and can be configured locally, but it was n
 - RLS policies exist, but the embedded owner connection bypasses normal RLS enforcement. Hosted use requires a non-owner role and transaction-level `app.workspace_id`; application-level workspace predicates are the active local boundary.
 - The credential auth implementation has no password reset, email verification, invitation flow, rate limiting, session revocation UI, or production account recovery. The development session secret fallback must not be used in production.
 - Existing-job match candidates use local title/client word overlap. There is no embedding index or model-based duplicate classifier.
+- Requested schedule alternatives and hold requests are stored as accepted provenance revisions rather than dedicated normalized request entities. Only actual user-created holds enter the `holds` table.
 - The extraction schema includes agency data, but acceptance currently persists the client organization and producer relationship; agency relationship persistence is incomplete.
 - Source immutability is an application convention and metadata flag, not a database trigger or write-once permission.
 - Per-field rejection prevents an overwrite but does not create a separate rejected `job_field_revision`; accepted non-null values receive revisions.

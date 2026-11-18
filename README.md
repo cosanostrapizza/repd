@@ -1,8 +1,8 @@
 # Repd
 
-Repd is an AI-native business manager for independent commercial creatives. The current application turns pasted producer inquiries into source-backed job proposals, identifies meaningful information gaps, prepares coordination work, and keeps consequential changes and outbound communication under the user’s control.
+Repd is an AI-native business manager for independent commercial creatives. The current application turns pasted producer inquiries into source-grounded opportunity briefings, explains what matters, prepares the next move, and keeps consequential changes and outbound communication under the user’s control.
 
-Milestone 1 is a functional local application. It includes authentication, workspace isolation, jobs, relationships, holds and calendar, a deterministic action engine, inquiry review, OpenAI-backed extraction and drafting, specialized action workspaces, and responsive desktop/mobile journeys.
+Milestone 2 is a functional local application. It preserves the Milestone 1 foundation—authentication, workspace isolation, jobs, relationships, holds, calendar, provenance, and deterministic rules—while replacing field-by-field intake with an agent-first briefing and optional correction model.
 
 See [PROJECT_STATE.md](PROJECT_STATE.md) for the implementation handoff and [IMPLEMENTATION.md](IMPLEMENTATION.md) for the checkpoint record and architectural decisions.
 
@@ -47,14 +47,14 @@ If AI is not configured or a provider request fails, Repd preserves the pasted s
 ## Implemented workflow
 
 1. Paste an inquiry or create a job manually.
-2. Repd stores the original text, calls OpenAI with a Zod-validated schema, and presents extracted values, evidence, confidence, conflicts, and possible existing-job matches.
-3. The user can correct or reject fields and choose whether to create a job or merge into an existing one.
-4. Accepted information updates one durable Job and records accepted source-backed field revisions.
-5. Contextual rules identify important missing information. Repd can prepare questions and an editable producer email for approval.
+2. Repd stores the original text, calls OpenAI with a Zod-validated business-briefing schema, and presents a natural-language understanding, compact opportunity facts, assessment, prioritized recommendations, and an editable response.
+3. The user can create the job from one coherent review. Field corrections, evidence, confidence, conflicts, and existing-job matching are available through progressive disclosure.
+4. Accepted information updates one durable Job and records source-backed field revisions without converting proposed terms into confirmed business facts.
+5. Requested date alternatives and hold requests remain explicit request intent. They do not create a shoot range or grant a hold. Contextual rules identify important missing information and prepare durable questions and coordination work.
 6. The user can approve, copy, or open the draft in their email client. Repd records delivery only after the user explicitly confirms that it was sent.
-7. A pasted producer response is reviewed against the existing job. Accepted answers update the job, answer durable questions, and allow obsolete actions to resolve.
+7. A pasted producer response is shown as a coherent update with changed facts and remaining ambiguity. Accepted answers update the job, answer durable questions, and allow obsolete actions to resolve.
 
-Home is a deterministic, grounded briefing assembled from stored jobs, actions, and activity. Job Detail is a read-first living brief with explicit edit mode. Hold conflicts and invoice preparation have purpose-specific action workspaces.
+Home is a deterministic, grounded briefing assembled from stored jobs, actions, waiting questions, and activity. Job Detail leads with the current situation and prepared decisions. Producer coordination, hold conflicts, and invoice preparation have purpose-specific workspaces; invoice drafts now have an editable internal preview.
 
 ## Verification
 
@@ -69,7 +69,7 @@ pnpm db:migrate
 
 `pnpm check` runs type checking, linting, and Vitest together.
 
-The current checkpoint has 16 passing unit/schema/database-integration tests and 12 passing Playwright journeys across desktop Chromium and an iPhone-sized mobile viewport. Playwright uses the isolated `.repd/e2e.db` database and port 3100; it does not reset the normal local workspace.
+The current checkpoint has 16 passing unit/schema/database-integration tests and 12 passing Playwright journeys across desktop Chromium and an iPhone-sized mobile viewport. The inquiry journey uses the Adidas scenario and verifies that alternative dates remain alternatives and a requested hold remains ungranted. Playwright uses the isolated `.repd/e2e.db` database and port 3100; it does not reset the normal local workspace.
 
 ## Current boundaries
 

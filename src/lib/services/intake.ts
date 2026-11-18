@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { db, id } from "@/db/client";
 import {
   actions,
+  activities,
   aiRuns,
   communications,
   intakeReviews,
@@ -53,6 +54,9 @@ const fieldLabels: Record<string, string> = {
   paymentTerms: "Payment terms",
   bookingStatus: "Booking status",
   lifecycleStatus: "Lifecycle",
+  requestedDates: "Requested dates",
+  holdRequest: "Hold request",
+  producerRequests: "Producer requests",
 };
 const scalarFieldKeys = Object.keys(fieldLabels) as Array<
   keyof InquiryExtraction
@@ -237,7 +241,15 @@ export async function createAndAnalyzeIntake(args: {
         status: "ready",
         proposedData: serialized(extraction),
         matchCandidates: candidates,
-        analysis: { summary: extraction.summary },
+        analysis: {
+          summary: extraction.summary,
+          assessment: extraction.assessment,
+          producerRequests: extraction.producerRequests,
+          missingInformation: extraction.missingInformation,
+          risks: extraction.risks,
+          recommendations: extraction.recommendations,
+          suggestedNextWorkflowState: extraction.suggestedNextWorkflowState,
+        },
         updatedAt: new Date(),
       })
       .where(
@@ -341,6 +353,8 @@ export async function acceptIntakeReview(args: {
   targetJobId?: string | null;
   corrections?: Record<string, string>;
   rejectedKeys?: string[];
+  preparedSubject?: string;
+  preparedBody?: string;
   provider?: AIProvider;
 }) {
   const [review] = await db
@@ -372,6 +386,13 @@ export async function acceptIntakeReview(args: {
     )
       (corrected[key as keyof InquiryExtraction] as { value: unknown }).value =
         null;
+  if (
+    corrected.holdRequest.requested &&
+    ["first_hold", "second_hold"].includes(corrected.bookingStatus.value ?? "")
+  ) {
+    corrected.bookingStatus.value = "unbooked";
+    corrected.bookingStatus.state = "unconfirmed";
+  }
   let jobId = args.targetJobId || review.targetJobId;
   const [currentJob] = jobId
     ? await db
@@ -468,6 +489,38 @@ export async function acceptIntakeReview(args: {
         confidence: field.confidence,
         requirement: requirements.find((req) => req.fieldKey === field.key),
       });
+  if (corrected.requestedDates.length)
+    await upsertFieldRevision({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      key: "requestedDates",
+      value: corrected.requestedDates,
+      state: "unconfirmed",
+      confidence: Math.min(
+        ...corrected.requestedDates.map((date) => date.confidence),
+      ),
+    });
+  if (corrected.holdRequest.requested)
+    await upsertFieldRevision({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      key: "holdRequest",
+      value: corrected.holdRequest,
+      state: "unconfirmed",
+      confidence: corrected.holdRequest.evidence ? 0.95 : 0.7,
+    });
+  if (corrected.producerRequests.length)
+    await upsertFieldRevision({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      key: "producerRequests",
+      value: corrected.producerRequests,
+      state: "unconfirmed",
+      confidence: 0.9,
+    });
   let producerId: string | null = null;
   if (corrected.producerName.value || corrected.producerEmail.value) {
     const email = corrected.producerEmail.value?.toLowerCase() ?? null;
@@ -522,6 +575,29 @@ export async function acceptIntakeReview(args: {
       updatedAt: new Date(),
     })
     .where(eq(intakeReviews.id, review.id));
+  await db.insert(activities).values({
+    id: id("activity"),
+    workspaceId: args.workspaceId,
+    jobId,
+    actorUserId: args.userId,
+    type:
+      review.kind === "producer_response"
+        ? "producer_response_accepted"
+        : currentJob
+          ? "source_update_accepted"
+          : "inquiry_accepted",
+    summary:
+      review.kind === "producer_response"
+        ? `Accepted a producer update: ${corrected.summary}`
+        : currentJob
+          ? `Updated the brief from a source: ${corrected.summary}`
+          : `Created the opportunity brief: ${corrected.summary}`,
+    metadata: {
+      reviewId: review.id,
+      sourceId: review.sourceId,
+      suggestedNextWorkflowState: corrected.suggestedNextWorkflowState,
+    },
+  });
   if (review.kind === "producer_response") {
     for (const field of extractionFields(corrected).filter(
       (item) => item.value !== null,
@@ -543,15 +619,126 @@ export async function acceptIntakeReview(args: {
           ),
         );
   }
-  await prepareCoordination({
-    workspaceId: args.workspaceId,
-    jobId,
-    sourceId: review.sourceId,
-    producerId,
-    provider: args.provider,
-  });
+  if (review.kind !== "producer_response") {
+    const prepared = await persistBriefingCoordination({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      producerId,
+      extraction: corrected,
+      subject: args.preparedSubject,
+      body: args.preparedBody,
+    });
+    if (!prepared)
+      await prepareCoordination({
+        workspaceId: args.workspaceId,
+        jobId,
+        sourceId: review.sourceId,
+        producerId,
+        provider: args.provider,
+      });
+  }
   await reevaluateWorkspace(args.workspaceId);
   return jobId;
+}
+
+async function persistBriefingCoordination(args: {
+  workspaceId: string;
+  jobId: string;
+  sourceId: string;
+  producerId: string | null;
+  extraction: InquiryExtraction;
+  subject?: string;
+  body?: string;
+}) {
+  const actionable = args.extraction.missingInformation.filter(
+    (item) => item.askExternalParty && item.suggestedQuestion,
+  );
+  if (!args.extraction.preparedResponse.body.trim()) return false;
+  const fieldKeys = actionable.map((item) => item.fieldKey).sort();
+  const deduplicationKey = `producer-coordination:${args.jobId}:${fieldKeys.join(",") || "response"}`;
+  const [existing] = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.workspaceId, args.workspaceId),
+        eq(actions.deduplicationKey, deduplicationKey),
+      ),
+    )
+    .limit(1);
+  if (existing) return true;
+  const [producer] = args.producerId
+    ? await db
+        .select()
+        .from(people)
+        .where(
+          and(
+            eq(people.id, args.producerId),
+            eq(people.workspaceId, args.workspaceId),
+          ),
+        )
+        .limit(1)
+    : [];
+  const questionIds: string[] = [];
+  for (const item of actionable) {
+    const questionId = id("question");
+    questionIds.push(questionId);
+    await db.insert(questions).values({
+      id: questionId,
+      workspaceId: args.workspaceId,
+      jobId: args.jobId,
+      fieldKey: item.fieldKey,
+      question: item.suggestedQuestion!,
+      whyItMatters: item.reason,
+      recipientPersonId: producer?.id ?? null,
+    });
+  }
+  const actionId = id("act");
+  const communicationId = id("communication");
+  const body = args.body?.trim() || args.extraction.preparedResponse.body;
+  await db.insert(actions).values({
+    id: actionId,
+    workspaceId: args.workspaceId,
+    jobId: args.jobId,
+    personId: producer?.id ?? null,
+    kind: "producer_coordination",
+    title: `Review note to ${producer?.name ?? "the producer"}`,
+    explanation: actionable.length
+      ? actionable.map((item) => item.label).join(" and ") +
+        " need clarification before the opportunity can move forward."
+      : "Repd prepared a response to the opportunity for review.",
+    recommendation:
+      args.extraction.recommendations[0] ??
+      "Review the prepared response before handing it off.",
+    priority: actionable.length ? "blocking" : "routine",
+    status: "pending_approval",
+    requiresApproval: true,
+    executionStatus: "not_requested",
+    deduplicationKey,
+    idempotencyKey: `communication:${communicationId}`,
+    payload: {
+      communicationId,
+      questionIds,
+      fieldKeys,
+      assessment: args.extraction.assessment,
+      sourceId: args.sourceId,
+    },
+    resolutionCondition: { type: "questions_answered", questionIds },
+    preparedContent: body,
+    reevaluatedAt: new Date(),
+  });
+  await db.insert(communications).values({
+    id: communicationId,
+    workspaceId: args.workspaceId,
+    jobId: args.jobId,
+    actionId,
+    recipientPersonId: producer?.id ?? null,
+    toEmail: producer?.email ?? null,
+    subject: args.subject?.trim() || args.extraction.preparedResponse.subject,
+    body,
+  });
+  return true;
 }
 
 export async function prepareCoordination(args: {

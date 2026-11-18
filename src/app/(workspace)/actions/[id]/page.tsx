@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { CommunicationEditor } from "@/components/agent/communication-editor";
+import { InvoiceDraftEditor } from "@/components/agent/invoice-draft-editor";
 import { db } from "@/db/client";
 import {
   actions,
@@ -307,6 +308,10 @@ export default async function ActionWorkspace({
                 <h2>{job.title}</h2>
                 <div className="invoice-preview">
                   <div>
+                    <span>Bill to</span>
+                    <strong>{draft?.billingName ?? "Missing"}</strong>
+                  </div>
+                  <div>
                     <span>Creative fee</span>
                     <strong>{formatMoney(job.feeCents, job.currency)}</strong>
                   </div>
@@ -336,6 +341,19 @@ export default async function ActionWorkspace({
                       Prepare invoice draft
                     </button>
                   </form>
+                )}
+                {draft && (
+                  <>
+                    <p className="trust-note">
+                      This is an editable internal preview. It has no invoice
+                      number and has not been issued or sent.
+                    </p>
+                    <InvoiceDraftEditor
+                      draft={draft}
+                      fallbackDescription={`Creative fee — ${job.title}`}
+                      currency={job.currency}
+                    />
+                  </>
                 )}
               </section>
             </main>

@@ -11,6 +11,7 @@ import {
   intakeReviews,
   invoiceDrafts,
   jobs,
+  organizations,
   questions,
 } from "@/db/schema";
 import { getAIConfiguration } from "./ai/provider";
@@ -93,6 +94,8 @@ export async function acceptReviewAction(
       targetJobId: value(formData, "targetJobId") || null,
       corrections,
       rejectedKeys,
+      preparedSubject: value(formData, "preparedSubject"),
+      preparedBody: value(formData, "preparedBody"),
     });
     revalidatePath("/");
     revalidatePath("/jobs");
@@ -322,7 +325,17 @@ export async function confirmCommunicationSent(formData: FormData) {
       );
   await db
     .update(actions)
-    .set({ executionStatus: "succeeded", updatedAt: new Date() })
+    .set({
+      executionStatus: "succeeded",
+      ...(payload.questionIds?.length
+        ? {}
+        : {
+            status: "resolved" as const,
+            resolutionReason: "completed_by_user",
+            resolvedAt: new Date(),
+          }),
+      updatedAt: new Date(),
+    })
     .where(eq(actions.id, row.action.id));
   await db.insert(actionEvents).values({
     id: id("aev"),
@@ -330,7 +343,7 @@ export async function confirmCommunicationSent(formData: FormData) {
     actionId: row.action.id,
     type: "execution_confirmed",
     fromStatus: row.action.status,
-    toStatus: row.action.status,
+    toStatus: payload.questionIds?.length ? row.action.status : "resolved",
     metadata: { communicationId, confirmedByUser: true },
   });
   revalidatePath(`/actions/${row.action.id}`);
@@ -363,7 +376,19 @@ export async function prepareInvoice(formData: FormData) {
       ),
     )
     .limit(1);
-  if (!existing)
+  if (!existing) {
+    const [client] = row.job.clientOrganizationId
+      ? await db
+          .select()
+          .from(organizations)
+          .where(
+            and(
+              eq(organizations.id, row.job.clientOrganizationId),
+              eq(organizations.workspaceId, ctx.workspaceId),
+            ),
+          )
+          .limit(1)
+      : [];
     await db.insert(invoiceDrafts).values({
       id: id("invoice"),
       workspaceId: ctx.workspaceId,
@@ -378,8 +403,10 @@ export async function prepareInvoice(formData: FormData) {
             },
           ]
         : [],
+      billingName: client?.name ?? null,
       paymentTerms: row.job.paymentTerms,
     });
+  }
   await db
     .update(jobs)
     .set({ invoiceStatus: "ready", updatedAt: new Date() })
@@ -407,4 +434,41 @@ export async function prepareInvoice(formData: FormData) {
   revalidatePath(`/actions/${actionId}`);
   revalidatePath(`/jobs/${row.job.id}`);
   revalidatePath("/");
+}
+
+export async function saveInvoiceDraft(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
+  const ctx = await requireContext();
+  const draftId = value(formData, "draftId");
+  const [draft] = await db
+    .select()
+    .from(invoiceDrafts)
+    .where(
+      and(
+        eq(invoiceDrafts.id, draftId),
+        eq(invoiceDrafts.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!draft) return { error: "Invoice draft not found." };
+  const amount = Number(value(formData, "amount"));
+  const description = value(formData, "description");
+  if (!description || !Number.isFinite(amount) || amount < 0)
+    return { error: "Add a valid line-item description and amount." };
+  await db
+    .update(invoiceDrafts)
+    .set({
+      billingName: value(formData, "billingName") || null,
+      billingEmail: value(formData, "billingEmail") || null,
+      paymentTerms: value(formData, "paymentTerms") || null,
+      notes: value(formData, "notes") || null,
+      lineItems: [{ description, amountCents: Math.round(amount * 100) }],
+      updatedAt: new Date(),
+    })
+    .where(eq(invoiceDrafts.id, draft.id));
+  revalidatePath(`/actions/${draft.actionId}`);
+  revalidatePath(`/jobs/${draft.jobId}`);
+  return { success: "Invoice draft saved. Nothing was issued or sent." };
 }

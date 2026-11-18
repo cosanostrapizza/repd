@@ -608,6 +608,96 @@ textarea {
   grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr);
   gap: 22px;
 }
+.briefing-card {
+  overflow: hidden;
+}
+.briefing-review-form {
+  display: grid;
+}
+.briefing-block {
+  padding: 24px clamp(20px, 3vw, 36px);
+  border-bottom: 1px solid var(--line);
+}
+.understanding-block {
+  background: #f2f5e9;
+}
+.briefing-summary,
+.assessment-block > p:last-child {
+  max-width: 760px;
+  margin: 7px 0 0;
+  font-family: Georgia, serif;
+  font-size: clamp(20px, 2vw, 25px);
+  line-height: 1.45;
+}
+.opportunity-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.opportunity-list > div {
+  display: grid;
+  gap: 3px;
+  padding: 16px 16px 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.opportunity-list > div:nth-child(even) {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+.opportunity-list span,
+.opportunity-list small {
+  color: var(--muted);
+}
+.opportunity-list strong {
+  font-size: 16px;
+}
+.recommendation-list,
+.plain-list {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+.recommendation-list li {
+  padding-left: 5px;
+}
+.prepared-response {
+  display: grid;
+  gap: 16px;
+  background: var(--ink);
+  color: white;
+}
+.prepared-response .trust-note,
+.prepared-response label {
+  color: #bdc9c1;
+}
+.prepared-response input,
+.prepared-response textarea {
+  color: var(--ink);
+  background: #fffef9;
+}
+.correction-panel > summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+.compact-review-fields {
+  margin-top: 16px;
+}
+.reject-interpretation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.reject-interpretation input {
+  width: auto;
+}
+.briefing-primary-actions {
+  padding: 20px clamp(20px, 3vw, 36px);
+}
 .sticky-card {
   position: sticky;
   top: 92px;
@@ -836,7 +926,7 @@ textarea {
 }
 .invoice-preview {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   border: 1px solid var(--line);
   border-radius: 12px;
   margin: 20px 0;
@@ -844,9 +934,13 @@ textarea {
 .invoice-preview div {
   padding: 18px;
   border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
-.invoice-preview div:last-child {
-  border: 0;
+.invoice-preview div:nth-child(even) {
+  border-right: 0;
+}
+.invoice-preview div:nth-last-child(-n + 2) {
+  border-bottom: 0;
 }
 .invoice-preview span {
   display: block;
@@ -1229,6 +1323,13 @@ textarea {
   }
   .daily-briefing .button {
     width: 100%;
+  }
+  .opportunity-list {
+    grid-template-columns: 1fr;
+  }
+  .opportunity-list > div:nth-child(even) {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 @media (max-width: 760px) {

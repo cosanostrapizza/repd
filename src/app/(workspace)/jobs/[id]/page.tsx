@@ -158,9 +158,34 @@ export default async function JobDetail({
       field.requirementState === "required_now" &&
       (!revision || revision.informationState === "missing"),
   );
-  const assessment = missing.length
-    ? `${missing.map(({ field }) => field.label ?? field.key).join(" and ")} ${missing.length === 1 ? "is" : "are"} still unresolved. ${nextNeed(job)} is the next useful step.`
-    : `${job.title} is ${bookingLabels[job.bookingStatus].toLowerCase()} and ${nextNeed(job).toLowerCase()}.`;
+  const requestedDateRevision = fieldRows.find(
+    ({ field }) => field.key === "requestedDates",
+  )?.revision?.value;
+  const requestedDates = Array.isArray(requestedDateRevision)
+    ? requestedDateRevision.filter(
+        (item): item is { label: string; relationship: string } =>
+          typeof item === "object" &&
+          item !== null &&
+          "label" in item &&
+          typeof item.label === "string",
+      )
+    : [];
+  const coordination = actionRows.find(
+    (item) => item.kind === "producer_coordination",
+  );
+  const sentMessage = messages.find((message) => message.status === "sent");
+  const assessment =
+    job.lifecycleStatus === "completed" && job.invoiceStatus === "not_ready"
+      ? "The work is complete and the invoice still needs to be prepared."
+      : sentMessage && openQuestions.length
+        ? `You’re waiting on a producer response to ${openQuestions.length === 1 ? "one open question" : `${openQuestions.length} open questions`}.`
+        : coordination
+          ? coordination.explanation
+          : requestedDates.length && !job.shootStart
+            ? `${requestedDates.map((date) => date.label).join(" or ")} ${requestedDates.length === 1 ? "is a proposed date" : "are alternative proposed dates"}; neither is confirmed or held.`
+            : missing.length
+              ? `${missing.map(({ field }) => field.label ?? field.key).join(" and ")} ${missing.length === 1 ? "is" : "are"} still unresolved. ${nextNeed(job)} is the next useful step.`
+              : `${job.title} is ${bookingLabels[job.bookingStatus].toLowerCase()} and ${nextNeed(job).toLowerCase()}.`;
   const overview = [
     {
       label: "Shoot",
@@ -171,8 +196,14 @@ export default async function JobDetail({
             day: "numeric",
             year: "numeric",
           })
-        : "Not known",
-      state: job.shootStart ? "confirmed" : "missing",
+        : requestedDates.length
+          ? requestedDates.map((date) => date.label).join(" or ")
+          : "Not known",
+      state: job.shootStart
+        ? "confirmed"
+        : requestedDates.length
+          ? "unconfirmed"
+          : "missing",
     },
     {
       label: "Creative fee",
@@ -251,6 +282,17 @@ export default async function JobDetail({
         </section>
         <div className="living-brief">
           <main>
+            {actionRows.length > 0 && (
+              <section className="section card">
+                <div className="card-pad section-title">
+                  <div>
+                    <p className="eyebrow">What needs to happen next</p>
+                    <h2>Prepared decisions</h2>
+                  </div>
+                </div>
+                <ActionList rows={actionRows} />
+              </section>
+            )}
             <section className="section">
               <div className="section-title">
                 <div>
@@ -331,15 +373,6 @@ export default async function JobDetail({
                   </div>
                 )}
               </div>
-            </section>
-            <section className="section card">
-              <div className="card-pad section-title">
-                <div>
-                  <p className="eyebrow">Prepared work</p>
-                  <h2>Open actions</h2>
-                </div>
-              </div>
-              <ActionList rows={actionRows} />
             </section>
             <section className="section card card-pad">
               <p className="eyebrow">What changed</p>

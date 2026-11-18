@@ -113,62 +113,52 @@ export default async function ReviewPage({
           <p className="eyebrow">Repd’s proposed understanding</p>
           <h1>
             {target
-              ? `Review changes to ${target.title}`
-              : "Review the new job"}
+              ? `What changed for ${target.title}`
+              : (extraction.jobTitle.value ?? "New opportunity")}
           </h1>
           <p className="lede">
-            Correct anything Repd misunderstood. Accepting creates proposed,
-            source-backed information—not unquestioned facts.
+            {target
+              ? "Review the update as a whole. Correct a detail only when Repd misunderstood it."
+              : "Repd has read the message, assessed the opportunity, and prepared the next move."}
           </p>
         </div>
         <span className="badge routine">Awaiting your review</span>
       </div>
       <div className="review-layout">
         <main>
-          <section className="card card-pad section">
-            <div className="assessment">
-              <p className="eyebrow">What Repd understood</p>
-              <p>{extraction.summary}</p>
-            </div>
+          <section className="card briefing-card section">
             <ReviewAcceptanceForm
               reviewId={row.review.id}
               targetJobId={target?.id}
+              kind={row.review.kind}
+              summary={extraction.summary}
+              assessment={extraction.assessment}
+              recommendations={extraction.recommendations}
+              producerRequests={extraction.producerRequests}
+              requestedDates={extraction.requestedDates}
+              holdRequest={extraction.holdRequest}
+              preparedResponse={extraction.preparedResponse}
               fields={fields}
               candidates={row.review.matchCandidates}
             />
           </section>
-          {row.review.matchCandidates.length > 0 && (
-            <section className="card card-pad">
-              <p className="eyebrow">Possible existing jobs</p>
-              <h2>Potential matches</h2>
-              {row.review.matchCandidates.map((candidate) => (
-                <div className="match-row" key={candidate.jobId}>
-                  <div>
-                    <strong>{candidate.title}</strong>
-                    <p>{candidate.reason}</p>
-                  </div>
-                  <span>
-                    {Math.round(candidate.confidence * 100)}% similarity
-                  </span>
-                </div>
-              ))}
-            </section>
-          )}
         </main>
         <aside>
           <section className="card card-pad sticky-card">
             <p className="eyebrow">Original source · immutable</p>
-            <h2>Producer message</h2>
-            <pre className="source-copy">{row.source.content}</pre>
+            <h2>Source message</h2>
+            <details className="source-document" open={false}>
+              <summary>View original message</summary>
+              <pre className="source-copy">{row.source.content}</pre>
+            </details>
             <p className="trust-note">
-              Evidence quotes shown beside fields come from this source.
+              The source is preserved. Accepting the briefing records Repd’s
+              interpretation as proposed or unconfirmed information.
             </p>
           </section>
           <form action={rejectReview} className="form-actions">
             <input type="hidden" name="reviewId" value={row.review.id} />
-            <button className="button ghost danger">
-              Reject this proposal
-            </button>
+            <button className="button ghost danger">Reject inquiry</button>
           </form>
         </aside>
       </div>
