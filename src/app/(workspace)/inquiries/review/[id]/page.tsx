@@ -137,7 +137,7 @@ export default async function ReviewPage({
               producerRequests={extraction.producerRequests}
               requestedDates={extraction.requestedDates}
               holdRequest={extraction.holdRequest}
-              preparedResponse={extraction.preparedResponse}
+              budgetRange={extraction.budgetRange}
               fields={fields}
               candidates={row.review.matchCandidates}
             />

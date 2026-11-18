@@ -218,6 +218,7 @@ export async function updateJob(
     .update(jobs)
     .set({
       title: text(formData, "title"),
+      titleSource: "manual",
       lifecycleStatus: lifecycle,
       bookingStatus: booking,
       shootStart: start,

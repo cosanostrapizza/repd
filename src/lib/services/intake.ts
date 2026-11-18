@@ -1,13 +1,19 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import type { z } from "zod";
 import { db, id } from "@/db/client";
 import {
   actions,
+  actionEvents,
   activities,
+  affiliations,
   aiRuns,
   communications,
+  coordinationDateOptions,
+  coordinationDependencies,
+  coordinationObjectives,
+  holds,
   intakeReviews,
   jobFieldRevisions,
   jobFields,
@@ -57,6 +63,7 @@ const fieldLabels: Record<string, string> = {
   requestedDates: "Requested dates",
   holdRequest: "Hold request",
   producerRequests: "Producer requests",
+  budgetRange: "Indicative budget",
 };
 const scalarFieldKeys = Object.keys(fieldLabels) as Array<
   keyof InquiryExtraction
@@ -180,6 +187,27 @@ export async function createAndAnalyzeIntake(args: {
   kind?: "new_job" | "job_update" | "producer_response";
   provider?: AIProvider;
 }) {
+  const contentHash = hashContent(args.content);
+  const [duplicate] = await db
+    .select({ review: intakeReviews })
+    .from(sources)
+    .innerJoin(intakeReviews, eq(intakeReviews.sourceId, sources.id))
+    .where(
+      and(
+        eq(sources.workspaceId, args.workspaceId),
+        eq(sources.contentHash, contentHash),
+        eq(intakeReviews.workspaceId, args.workspaceId),
+      ),
+    )
+    .orderBy(desc(intakeReviews.createdAt))
+    .limit(1);
+  if (
+    duplicate &&
+    duplicate.review.kind ===
+      (args.kind ?? (args.targetJobId ? "job_update" : "new_job")) &&
+    (!args.targetJobId || duplicate.review.targetJobId === args.targetJobId)
+  )
+    return duplicate.review.id;
   const sourceId = id("source"),
     reviewId = id("review");
   await db.insert(sources).values({
@@ -190,7 +218,7 @@ export async function createAndAnalyzeIntake(args: {
       args.kind === "producer_response" ? "producer_response" : "pasted_email",
     direction: "incoming",
     content: args.content,
-    contentHash: hashContent(args.content),
+    contentHash,
     metadata: { immutable: true },
   });
   await db.insert(intakeReviews).values({
@@ -211,6 +239,7 @@ export async function createAndAnalyzeIntake(args: {
     const target = args.targetJobId
       ? currentJobs.find((job) => job.id === args.targetJobId)
       : null;
+    const sourceContext = `\nSource context: captured ${new Date().toISOString()}; user timezone America/New_York.`;
     const context = target
       ? `\nThis source is being reviewed against this existing job: ${JSON.stringify({ id: target.id, title: target.title, lifecycleStatus: target.lifecycleStatus, bookingStatus: target.bookingStatus, shootStart: target.shootStart, location: target.location, feeCents: target.feeCents, usageTerms: target.usageTerms })}`
       : `\nExisting job titles for cautious match suggestions: ${currentJobs.map((job) => job.title).join(" | ") || "none"}`;
@@ -219,7 +248,7 @@ export async function createAndAnalyzeIntake(args: {
       sourceId,
       jobId: args.targetJobId ?? undefined,
       purpose: "inquiry_extraction",
-      input: `${args.content}${context}`,
+      input: `${args.content}${sourceContext}${context}`,
       instructions: inquiryExtractionInstructions,
       schema: inquiryExtractionSchema,
       schemaName: "repd_inquiry_extraction_v1",
@@ -278,7 +307,8 @@ export function extractionFields(extraction: InquiryExtraction) {
       (key) =>
         typeof extraction[key] === "object" &&
         extraction[key] !== null &&
-        "state" in (extraction[key] as object),
+        "state" in (extraction[key] as object) &&
+        "value" in (extraction[key] as object),
     )
     .map((key) => ({
       key: String(key),
@@ -353,8 +383,6 @@ export async function acceptIntakeReview(args: {
   targetJobId?: string | null;
   corrections?: Record<string, string>;
   rejectedKeys?: string[];
-  preparedSubject?: string;
-  preparedBody?: string;
   provider?: AIProvider;
 }) {
   const [review] = await db
@@ -425,6 +453,10 @@ export async function acceptIntakeReview(args: {
   } else organizationId = currentJob?.clientOrganizationId ?? null;
   const values = {
     title: corrected.jobTitle.value ?? currentJob?.title ?? "New inquiry",
+    titleSource:
+      corrected.jobTitle.value != null
+        ? corrected.jobTitleSource
+        : (currentJob?.titleSource ?? ("manual" as const)),
     clientOrganizationId: organizationId,
     jobType:
       corrected.jobType.value ?? currentJob?.jobType ?? ("commercial" as const),
@@ -444,6 +476,14 @@ export async function acceptIntakeReview(args: {
       : (currentJob?.shootEnd ?? null),
     location: corrected.location.value ?? currentJob?.location ?? null,
     feeCents: corrected.feeCents.value ?? currentJob?.feeCents ?? null,
+    proposedBudgetMinCents:
+      corrected.budgetRange.minCents ??
+      currentJob?.proposedBudgetMinCents ??
+      null,
+    proposedBudgetMaxCents:
+      corrected.budgetRange.maxCents ??
+      currentJob?.proposedBudgetMaxCents ??
+      null,
     currency: corrected.currency.value ?? currentJob?.currency ?? "USD",
     usageTerms: corrected.usageTerms.value ?? currentJob?.usageTerms ?? null,
     deliverables:
@@ -476,6 +516,7 @@ export async function acceptIntakeReview(args: {
     ...values,
     lifecycleStatus: values.lifecycleStatus,
     jobType: values.jobType,
+    requestedDateCount: corrected.requestedDates.length,
   });
   for (const field of extractionFields(corrected))
     if (field.value !== null)
@@ -521,6 +562,16 @@ export async function acceptIntakeReview(args: {
       state: "unconfirmed",
       confidence: 0.9,
     });
+  if (corrected.budgetRange.minCents != null)
+    await upsertFieldRevision({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      key: "budgetRange",
+      value: corrected.budgetRange,
+      state: corrected.budgetRange.state,
+      confidence: corrected.budgetRange.confidence,
+    });
   let producerId: string | null = null;
   if (corrected.producerName.value || corrected.producerEmail.value) {
     const email = corrected.producerEmail.value?.toLowerCase() ?? null;
@@ -565,6 +616,74 @@ export async function acceptIntakeReview(args: {
         displayNameSnapshot:
           corrected.producerName.value ?? person?.name ?? "Producer",
       });
+    if (corrected.agencyName.value && producerId) {
+      const [existingAgency] = await db
+        .select()
+        .from(organizations)
+        .where(
+          and(
+            eq(organizations.workspaceId, args.workspaceId),
+            eq(organizations.name, corrected.agencyName.value),
+          ),
+        )
+        .limit(1);
+      const agencyId = existingAgency?.id ?? id("org");
+      if (!existingAgency)
+        await db.insert(organizations).values({
+          id: agencyId,
+          workspaceId: args.workspaceId,
+          name: corrected.agencyName.value,
+          kind: "agency",
+        });
+      const [agencyParticipant] = await db
+        .select()
+        .from(jobParticipants)
+        .where(
+          and(
+            eq(jobParticipants.jobId, jobId),
+            eq(jobParticipants.organizationId, agencyId),
+          ),
+        )
+        .limit(1);
+      if (!agencyParticipant)
+        await db.insert(jobParticipants).values({
+          id: id("participant"),
+          workspaceId: args.workspaceId,
+          jobId,
+          organizationId: agencyId,
+          role: "Agency",
+          displayNameSnapshot: corrected.agencyName.value,
+        });
+      await db
+        .update(jobParticipants)
+        .set({ organizationId: agencyId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(jobParticipants.jobId, jobId),
+            eq(jobParticipants.personId, producerId),
+          ),
+        );
+      const [existingAffiliation] = await db
+        .select()
+        .from(affiliations)
+        .where(
+          and(
+            eq(affiliations.workspaceId, args.workspaceId),
+            eq(affiliations.personId, producerId),
+            eq(affiliations.organizationId, agencyId),
+          ),
+        )
+        .limit(1);
+      if (!existingAffiliation)
+        await db.insert(affiliations).values({
+          id: id("aff"),
+          workspaceId: args.workspaceId,
+          personId: producerId,
+          organizationId: agencyId,
+          title: "Producer",
+          isPrimary: true,
+        });
+    }
   }
   await db
     .update(intakeReviews)
@@ -618,127 +737,893 @@ export async function acceptIntakeReview(args: {
             eq(questions.status, "asked"),
           ),
         );
+    await reconcileAdvanceInquiryObjective({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      extraction: corrected,
+    });
   }
   if (review.kind !== "producer_response") {
-    const prepared = await persistBriefingCoordination({
+    await createAdvanceInquiryObjective({
       workspaceId: args.workspaceId,
       jobId,
       sourceId: review.sourceId,
       producerId,
       extraction: corrected,
-      subject: args.preparedSubject,
-      body: args.preparedBody,
     });
-    if (!prepared)
-      await prepareCoordination({
-        workspaceId: args.workspaceId,
-        jobId,
-        sourceId: review.sourceId,
-        producerId,
-        provider: args.provider,
-      });
   }
   await reevaluateWorkspace(args.workspaceId);
   return jobId;
 }
 
-async function persistBriefingCoordination(args: {
+function inferDateOption(
+  option: InquiryExtraction["requestedDates"][number],
+  capturedAt: Date,
+) {
+  if (option.start) {
+    const startsAt = new Date(option.start);
+    const endsAt = option.end
+      ? new Date(option.end)
+      : new Date(startsAt.getTime() + 10 * 60 * 60 * 1000);
+    return { startsAt, endsAt };
+  }
+  if (option.relationship === "range") return { startsAt: null, endsAt: null };
+  const months: Record<string, number> = {
+    january: 0,
+    february: 1,
+    march: 2,
+    april: 3,
+    may: 4,
+    june: 5,
+    july: 6,
+    august: 7,
+    september: 8,
+    october: 9,
+    november: 10,
+    december: 11,
+  };
+  const match = option.label
+    .toLowerCase()
+    .match(
+      /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:,?\s+(\d{4}))?/,
+    );
+  if (!match) return { startsAt: null, endsAt: null };
+  const month = months[match[1]];
+  const day = Number(match[2]);
+  let year = match[3] ? Number(match[3]) : capturedAt.getUTCFullYear();
+  const candidate = new Date(Date.UTC(year, month, day, 14));
+  if (!match[3] && candidate.getTime() < capturedAt.getTime() - 30 * 86400000)
+    year += 1;
+  const startsAt = new Date(Date.UTC(year, month, day, 14));
+  return {
+    startsAt,
+    endsAt: new Date(startsAt.getTime() + 10 * 60 * 60 * 1000),
+  };
+}
+
+async function insertDependency(args: {
+  workspaceId: string;
+  objectiveId: string;
+  key: string;
+  label: string;
+  owner: "repd" | "creative" | "external";
+  status:
+    | "verified"
+    | "no_record_found"
+    | "not_checked"
+    | "unable_to_check"
+    | "needs_decision"
+    | "needs_external"
+    | "resolved"
+    | "not_applicable";
+  result: string;
+  value?: unknown;
+  evidence?: Record<string, unknown>;
+  resolutionSource?: "records" | "user" | "external" | "system";
+}) {
+  const [existing] = await db
+    .select()
+    .from(coordinationDependencies)
+    .where(
+      and(
+        eq(coordinationDependencies.objectiveId, args.objectiveId),
+        eq(coordinationDependencies.key, args.key),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing;
+  const dependency = {
+    id: id("dep"),
+    workspaceId: args.workspaceId,
+    objectiveId: args.objectiveId,
+    key: args.key,
+    label: args.label,
+    owner: args.owner,
+    status: args.status,
+    result: args.result,
+    value: args.value,
+    evidence: args.evidence,
+    resolutionSource: args.resolutionSource,
+  };
+  await db.insert(coordinationDependencies).values(dependency);
+  return dependency;
+}
+
+export async function createAdvanceInquiryObjective(args: {
   workspaceId: string;
   jobId: string;
   sourceId: string;
   producerId: string | null;
   extraction: InquiryExtraction;
-  subject?: string;
-  body?: string;
 }) {
-  const actionable = args.extraction.missingInformation.filter(
-    (item) => item.askExternalParty && item.suggestedQuestion,
-  );
-  if (!args.extraction.preparedResponse.body.trim()) return false;
-  const fieldKeys = actionable.map((item) => item.fieldKey).sort();
-  const deduplicationKey = `producer-coordination:${args.jobId}:${fieldKeys.join(",") || "response"}`;
   const [existing] = await db
+    .select()
+    .from(coordinationObjectives)
+    .where(
+      and(
+        eq(coordinationObjectives.workspaceId, args.workspaceId),
+        eq(coordinationObjectives.jobId, args.jobId),
+        eq(coordinationObjectives.kind, "advance_inquiry"),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing.id;
+  const [source, job] = await Promise.all([
+    db
+      .select()
+      .from(sources)
+      .where(
+        and(
+          eq(sources.id, args.sourceId),
+          eq(sources.workspaceId, args.workspaceId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select()
+      .from(jobs)
+      .where(
+        and(eq(jobs.id, args.jobId), eq(jobs.workspaceId, args.workspaceId)),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+  ]);
+  if (!job || !source) throw new Error("Accepted inquiry context is missing.");
+  const objectiveId = id("objective");
+  await db.insert(coordinationObjectives).values({
+    id: objectiveId,
+    workspaceId: args.workspaceId,
+    jobId: args.jobId,
+    sourceId: args.sourceId,
+    kind: "advance_inquiry",
+    title: `Advance ${job.title} opportunity`,
+    outcome:
+      "Reach a truthful booking decision and prepare the right producer response.",
+    summary: args.extraction.summary,
+    state: "awaiting_decisions",
+    nextAction: "Review Repd’s checks, then decide interest and hold handling.",
+    completedSteps: [
+      "Understood the inquiry",
+      "Preserved proposed terms and source evidence",
+      "Checked records available inside Repd",
+    ],
+    evidence: { sourceId: args.sourceId },
+  });
+
+  const allHolds = await db
+    .select({ hold: holds, job: jobs })
+    .from(holds)
+    .innerJoin(jobs, eq(holds.jobId, jobs.id))
+    .where(
+      and(
+        eq(holds.workspaceId, args.workspaceId),
+        eq(holds.status, "active"),
+        ne(holds.jobId, args.jobId),
+      ),
+    );
+  for (const option of args.extraction.requestedDates) {
+    const { startsAt, endsAt } = inferDateOption(option, source.capturedAt);
+    const optionId = id("date");
+    const requested =
+      args.extraction.holdRequest.requested &&
+      (args.extraction.holdRequest.dates.length === 0 ||
+        args.extraction.holdRequest.dates.some(
+          (label) =>
+            label.toLowerCase().includes(option.label.toLowerCase()) ||
+            option.label.toLowerCase().includes(label.toLowerCase()),
+        ));
+    await db.insert(coordinationDateOptions).values({
+      id: optionId,
+      workspaceId: args.workspaceId,
+      objectiveId,
+      jobId: args.jobId,
+      sourceId: args.sourceId,
+      label: option.label,
+      startsAt,
+      endsAt,
+      relationship: option.relationship,
+      tentative: true,
+      holdRequested: requested,
+      holdPriority: requested ? args.extraction.holdRequest.kind : null,
+      holdState: requested ? "requested" : "not_requested",
+      evidence: option.evidence ?? undefined,
+    });
+    const conflicts =
+      startsAt && endsAt
+        ? allHolds.filter(
+            ({ hold }) => startsAt < hold.endsAt && endsAt > hold.startsAt,
+          )
+        : [];
+    await insertDependency({
+      workspaceId: args.workspaceId,
+      objectiveId,
+      key: `availability:${optionId}`,
+      label: `Availability for ${option.label}`,
+      owner: "repd",
+      status: !startsAt
+        ? "unable_to_check"
+        : conflicts.length
+          ? "verified"
+          : "verified",
+      result: !startsAt
+        ? "The date wording is preserved, but Repd could not resolve a safe calendar date."
+        : conflicts.length
+          ? `Conflicts with ${conflicts.map(({ job: conflictJob }) => conflictJob.title).join(", ")} in Repd.`
+          : "No conflict with bookings or holds recorded in Repd. External calendars were not checked.",
+      value: { optionId, conflictJobIds: conflicts.map(({ job }) => job.id) },
+      evidence: {
+        checked: ["Repd jobs", "Repd holds"],
+        externalCalendar: false,
+      },
+      resolutionSource: "records",
+    });
+  }
+
+  await insertDependency({
+    workspaceId: args.workspaceId,
+    objectiveId,
+    key: "interest",
+    label: "Creative interest",
+    owner: "creative",
+    status: "needs_decision",
+    result: "Alex has not decided whether to explore the opportunity.",
+  });
+  if (args.extraction.holdRequest.requested)
+    await insertDependency({
+      workspaceId: args.workspaceId,
+      objectiveId,
+      key: "hold_decisions",
+      label: "Requested holds",
+      owner: "creative",
+      status: "needs_decision",
+      result: "The producer requested holds; none have been granted.",
+    });
+
+  const clientHistory = job.clientOrganizationId
+    ? await db
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.workspaceId, args.workspaceId),
+            eq(jobs.clientOrganizationId, job.clientOrganizationId),
+            ne(jobs.id, job.id),
+          ),
+        )
+    : [];
+  await insertDependency({
+    workspaceId: args.workspaceId,
+    objectiveId,
+    key: "client_history",
+    label: "Relevant client history",
+    owner: "repd",
+    status: clientHistory.length ? "verified" : "no_record_found",
+    result: clientHistory.length
+      ? `Repd found ${clientHistory.length} previous ${clientHistory.length === 1 ? "job" : "jobs"} for this client: ${clientHistory.map((item) => item.title).join(", ")}.`
+      : "No previous job for this client was found in Repd. This does not prove there is no prior work.",
+    value: { jobIds: clientHistory.map((item) => item.id) },
+    resolutionSource: "records",
+  });
+  const conflictRequest = [
+    ...args.extraction.producerRequests,
+    ...args.extraction.relevantNotes,
+  ].some((value) => /conflict|exclusiv|categor/i.test(value));
+  if (conflictRequest)
+    await insertDependency({
+      workspaceId: args.workspaceId,
+      objectiveId,
+      key: "category_conflicts",
+      label: "Category conflicts",
+      owner: "creative",
+      status: "needs_decision",
+      result:
+        "Repd checked recorded job history, but no contract repository or external files are connected. Alex must confirm any restriction or uncertainty.",
+      evidence: {
+        contractIntegration: false,
+        clientHistoryCount: clientHistory.length,
+      },
+    });
+  for (const item of args.extraction.missingInformation.filter(
+    (candidate) =>
+      candidate.owner === "external" && candidate.suggestedQuestion,
+  ))
+    await insertDependency({
+      workspaceId: args.workspaceId,
+      objectiveId,
+      key: item.fieldKey,
+      label: item.label,
+      owner: "external",
+      status: "needs_external",
+      result: item.reason,
+      value: { suggestedQuestion: item.suggestedQuestion },
+    });
+
+  const actionId = id("act");
+  await db.insert(actions).values({
+    id: actionId,
+    workspaceId: args.workspaceId,
+    jobId: args.jobId,
+    personId: args.producerId,
+    kind: "advance_inquiry",
+    title: `Decide how to advance ${job.title}`,
+    explanation:
+      "Repd completed the internal checks available from its records. A few creative decisions are needed before a producer reply can be prepared.",
+    recommendation:
+      "Review the checks and make the grouped opportunity decision.",
+    priority: "blocking",
+    deduplicationKey: `advance-inquiry:${args.jobId}`,
+    payload: { objectiveId, sourceId: args.sourceId },
+    resolutionCondition: { type: "objective_completed" },
+    requiresApproval: false,
+    reevaluatedAt: new Date(),
+  });
+  return objectiveId;
+}
+
+export async function recordAdvanceInquiryDecisions(args: {
+  workspaceId: string;
+  userId: string;
+  objectiveId: string;
+  interest: "yes" | "maybe" | "no";
+  categoryConflict?: "none_known" | "possible" | "unsure";
+  dateDecisions: Record<string, "offer" | "defer" | "decline">;
+  provider?: AIProvider;
+}) {
+  const [objective] = await db
+    .select()
+    .from(coordinationObjectives)
+    .where(
+      and(
+        eq(coordinationObjectives.id, args.objectiveId),
+        eq(coordinationObjectives.workspaceId, args.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!objective) throw new Error("Coordination objective not found.");
+  const [job, dateOptions, dependencies, action, producer] = await Promise.all([
+    db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, objective.jobId),
+          eq(jobs.workspaceId, args.workspaceId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select()
+      .from(coordinationDateOptions)
+      .where(
+        and(
+          eq(coordinationDateOptions.objectiveId, objective.id),
+          eq(coordinationDateOptions.workspaceId, args.workspaceId),
+        ),
+      ),
+    db
+      .select()
+      .from(coordinationDependencies)
+      .where(
+        and(
+          eq(coordinationDependencies.objectiveId, objective.id),
+          eq(coordinationDependencies.workspaceId, args.workspaceId),
+        ),
+      ),
+    db
+      .select()
+      .from(actions)
+      .where(
+        and(
+          eq(actions.workspaceId, args.workspaceId),
+          eq(actions.deduplicationKey, `advance-inquiry:${objective.jobId}`),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({ person: people })
+      .from(jobParticipants)
+      .innerJoin(people, eq(jobParticipants.personId, people.id))
+      .where(
+        and(
+          eq(jobParticipants.workspaceId, args.workspaceId),
+          eq(jobParticipants.jobId, objective.jobId),
+          eq(jobParticipants.role, "Producer"),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]?.person),
+  ]);
+  if (!job || !action) throw new Error("Objective records are incomplete.");
+  const now = new Date();
+  await db
+    .update(coordinationDependencies)
+    .set({
+      status: "resolved",
+      result:
+        args.interest === "yes"
+          ? "Alex wants to explore the opportunity."
+          : args.interest === "maybe"
+            ? "Alex may be interested depending on the unresolved terms."
+            : "Alex decided to decline the opportunity.",
+      value: args.interest,
+      resolutionSource: "user",
+      resolvedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(coordinationDependencies.objectiveId, objective.id),
+        eq(coordinationDependencies.key, "interest"),
+      ),
+    );
+  if (args.categoryConflict)
+    await db
+      .update(coordinationDependencies)
+      .set({
+        status: "resolved",
+        result:
+          args.categoryConflict === "none_known"
+            ? "Alex reported no known category conflict; Repd did not independently verify contracts."
+            : args.categoryConflict === "possible"
+              ? "Alex identified a possible category conflict that must remain qualified in the reply."
+              : "Alex is unsure about category restrictions; the reply must avoid a definitive assurance.",
+        value: args.categoryConflict,
+        resolutionSource: "user",
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(coordinationDependencies.objectiveId, objective.id),
+          eq(coordinationDependencies.key, "category_conflicts"),
+        ),
+      );
+  let grantedCount = 0;
+  for (const option of dateOptions) {
+    const decision = args.dateDecisions[option.id] ?? "defer";
+    let holdState = option.holdState;
+    if (
+      decision === "offer" &&
+      option.holdRequested &&
+      option.startsAt &&
+      option.endsAt
+    ) {
+      const [existingHold] = await db
+        .select()
+        .from(holds)
+        .where(
+          and(
+            eq(holds.workspaceId, args.workspaceId),
+            eq(holds.jobId, job.id),
+            eq(holds.status, "active"),
+            eq(holds.startsAt, option.startsAt),
+            eq(holds.endsAt, option.endsAt),
+          ),
+        )
+        .limit(1);
+      if (!existingHold)
+        await db.insert(holds).values({
+          id: id("hold"),
+          workspaceId: args.workspaceId,
+          jobId: job.id,
+          kind:
+            option.holdPriority === "first"
+              ? "first"
+              : option.holdPriority === "second"
+                ? "second"
+                : "second",
+          startsAt: option.startsAt,
+          endsAt: option.endsAt,
+        });
+      holdState = "granted";
+      grantedCount += 1;
+    } else if (decision === "decline") holdState = "declined";
+    await db
+      .update(coordinationDateOptions)
+      .set({ decision, holdState, updatedAt: now })
+      .where(eq(coordinationDateOptions.id, option.id));
+  }
+  if (dependencies.some((item) => item.key === "hold_decisions"))
+    await db
+      .update(coordinationDependencies)
+      .set({
+        status: "resolved",
+        result: grantedCount
+          ? `${grantedCount} requested ${grantedCount === 1 ? "hold was" : "holds were"} explicitly granted and recorded.`
+          : "No requested hold was granted.",
+        value: args.dateDecisions,
+        resolutionSource: "user",
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(coordinationDependencies.objectiveId, objective.id),
+          eq(coordinationDependencies.key, "hold_decisions"),
+        ),
+      );
+  if (grantedCount)
+    await db
+      .update(jobs)
+      .set({
+        bookingStatus: dateOptions.some(
+          (item) =>
+            args.dateDecisions[item.id] === "offer" &&
+            item.holdPriority === "first",
+        )
+          ? "first_hold"
+          : "second_hold",
+        updatedAt: now,
+      })
+      .where(and(eq(jobs.id, job.id), eq(jobs.workspaceId, args.workspaceId)));
+
+  await db
+    .update(coordinationObjectives)
+    .set({
+      state: "preparing_response",
+      nextAction: "Repd is preparing a response grounded in these decisions.",
+      updatedAt: now,
+    })
+    .where(eq(coordinationObjectives.id, objective.id));
+  const external = dependencies.filter(
+    (item) => item.owner === "external" && item.status === "needs_external",
+  );
+  const questionIds: string[] = [];
+  if (args.interest !== "no") {
+    for (const dependency of external) {
+      const suggested = dependency.value as {
+        suggestedQuestion?: string;
+      } | null;
+      const [existingQuestion] = await db
+        .select()
+        .from(questions)
+        .where(
+          and(
+            eq(questions.workspaceId, args.workspaceId),
+            eq(questions.jobId, job.id),
+            eq(questions.fieldKey, dependency.key),
+            ne(questions.status, "obsolete"),
+          ),
+        )
+        .limit(1);
+      if (existingQuestion) questionIds.push(existingQuestion.id);
+      else {
+        const questionId = id("question");
+        questionIds.push(questionId);
+        await db.insert(questions).values({
+          id: questionId,
+          workspaceId: args.workspaceId,
+          jobId: job.id,
+          fieldKey: dependency.key,
+          question:
+            suggested?.suggestedQuestion ??
+            `Could you clarify ${dependency.label.toLowerCase()}?`,
+          whyItMatters: dependency.result,
+          recipientPersonId: producer?.id ?? null,
+        });
+      }
+    }
+  } else {
+    for (const dependency of external)
+      await db
+        .update(questions)
+        .set({ status: "obsolete", updatedAt: now })
+        .where(
+          and(
+            eq(questions.workspaceId, args.workspaceId),
+            eq(questions.jobId, job.id),
+            eq(questions.fieldKey, dependency.key),
+            eq(questions.status, "draft"),
+          ),
+        );
+  }
+  try {
+    const provider = args.provider ?? getAIProvider();
+    const draft = await runTracked({
+      workspaceId: args.workspaceId,
+      sourceId: objective.sourceId ?? undefined,
+      jobId: job.id,
+      purpose: "objective_communication",
+      input: JSON.stringify({
+        job: {
+          title: job.title,
+          proposedBudgetMinCents: job.proposedBudgetMinCents,
+          proposedBudgetMaxCents: job.proposedBudgetMaxCents,
+          usageTerms: job.usageTerms,
+          location: job.location,
+        },
+        producer: producer
+          ? { name: producer.name, email: producer.email }
+          : null,
+        decisions: {
+          interest: args.interest,
+          categoryConflict: args.categoryConflict ?? null,
+          dates: dateOptions.map((option) => ({
+            label: option.label,
+            decision: args.dateDecisions[option.id] ?? "defer",
+            holdPriority: option.holdPriority,
+          })),
+        },
+        internalChecks: dependencies
+          .filter((item) => item.owner === "repd")
+          .map((item) => ({ label: item.label, result: item.result })),
+        externalQuestions:
+          args.interest === "no"
+            ? []
+            : external.map((item) => ({
+                fieldKey: item.key,
+                question: (item.value as { suggestedQuestion?: string } | null)
+                  ?.suggestedQuestion,
+                whyItMatters: item.result,
+              })),
+      }),
+      instructions: `${draftCommunicationInstructions}\nThis draft follows an already-recorded creative decision. If interest is no, write a polite decline and ask no questions. If interest is maybe or yes, reflect only the exact hold decisions supplied. A granted hold may be stated as granted; deferred or declined dates must never sound available. Qualify unresolved category conflicts. Ask only the supplied external questions.`,
+      schema: communicationDraftSchema,
+      schemaName: "repd_objective_communication_v1",
+      provider,
+    });
+    const [existingCommunication] = await db
+      .select()
+      .from(communications)
+      .where(
+        and(
+          eq(communications.workspaceId, args.workspaceId),
+          eq(communications.actionId, action.id),
+        ),
+      )
+      .limit(1);
+    const communicationId = existingCommunication?.id ?? id("communication");
+    if (existingCommunication)
+      await db
+        .update(communications)
+        .set({
+          recipientPersonId: producer?.id ?? null,
+          toEmail: producer?.email ?? null,
+          subject: draft.subject,
+          body: draft.body,
+          status: "draft",
+          approvedAt: null,
+          revision: existingCommunication.revision + 1,
+          updatedAt: now,
+        })
+        .where(eq(communications.id, existingCommunication.id));
+    else
+      await db.insert(communications).values({
+        id: communicationId,
+        workspaceId: args.workspaceId,
+        jobId: job.id,
+        actionId: action.id,
+        recipientPersonId: producer?.id ?? null,
+        toEmail: producer?.email ?? null,
+        subject: draft.subject,
+        body: draft.body,
+      });
+    await db
+      .update(actions)
+      .set({
+        kind: "producer_coordination",
+        title: `Review reply to ${producer?.name ?? "the producer"}`,
+        explanation:
+          args.interest === "no"
+            ? "Repd prepared a polite decline from Alex’s decision."
+            : "Repd prepared a response using Alex’s interest, exact hold choices, internal checks, and the remaining commercial questions.",
+        recommendation: "Review the decision-conditioned reply before handoff.",
+        status: "pending_approval",
+        executionStatus: "not_requested",
+        requiresApproval: true,
+        preparedContent: draft.body,
+        payload: {
+          objectiveId: objective.id,
+          communicationId,
+          questionIds,
+          fieldKeys: external.map((item) => item.key),
+          interest: args.interest,
+        },
+        resolutionCondition: { type: "questions_answered", questionIds },
+        updatedAt: now,
+      })
+      .where(eq(actions.id, action.id));
+    await db
+      .update(coordinationObjectives)
+      .set({
+        state: "awaiting_approval",
+        nextAction: "Review and approve the prepared producer response.",
+        completedSteps: [
+          ...objective.completedSteps,
+          "Recorded Alex’s opportunity and hold decisions",
+          "Prepared a decision-conditioned producer response",
+        ],
+        updatedAt: now,
+      })
+      .where(eq(coordinationObjectives.id, objective.id));
+    await db.insert(activities).values({
+      id: id("activity"),
+      workspaceId: args.workspaceId,
+      jobId: job.id,
+      actorUserId: args.userId,
+      type: "coordination_decisions_recorded",
+      summary:
+        "Recorded opportunity decisions and prepared the producer response.",
+      metadata: {
+        objectiveId: objective.id,
+        interest: args.interest,
+        grantedCount,
+      },
+    });
+    await reevaluateWorkspace(args.workspaceId);
+    return action.id;
+  } catch (error) {
+    await db
+      .update(coordinationObjectives)
+      .set({
+        state: "needs_attention",
+        nextAction:
+          "The decisions are saved, but Repd could not prepare the response. Retry when AI is available.",
+        updatedAt: new Date(),
+      })
+      .where(eq(coordinationObjectives.id, objective.id));
+    throw error;
+  }
+}
+
+export async function reconcileAdvanceInquiryObjective(args: {
+  workspaceId: string;
+  jobId: string;
+  sourceId: string;
+  extraction: InquiryExtraction;
+}) {
+  const [objective] = await db
+    .select()
+    .from(coordinationObjectives)
+    .where(
+      and(
+        eq(coordinationObjectives.workspaceId, args.workspaceId),
+        eq(coordinationObjectives.jobId, args.jobId),
+        eq(coordinationObjectives.kind, "advance_inquiry"),
+      ),
+    )
+    .limit(1);
+  if (!objective) return;
+  const resolvedKeys = new Set(
+    extractionFields(args.extraction)
+      .filter((field) => field.value != null)
+      .map((field) => field.key),
+  );
+  if (args.extraction.budgetRange.includesUsage != null)
+    resolvedKeys.add("budgetIncludesUsage");
+  if (
+    [
+      ...args.extraction.producerRequests,
+      ...args.extraction.relevantNotes,
+    ].some((value) => /treatment|deck/i.test(value))
+  )
+    resolvedKeys.add("treatmentExpectations");
+  const deps = await db
+    .select()
+    .from(coordinationDependencies)
+    .where(
+      and(
+        eq(coordinationDependencies.workspaceId, args.workspaceId),
+        eq(coordinationDependencies.objectiveId, objective.id),
+      ),
+    );
+  for (const dependency of deps.filter(
+    (item) => item.owner === "external" && resolvedKeys.has(item.key),
+  )) {
+    await db
+      .update(coordinationDependencies)
+      .set({
+        status: "resolved",
+        result:
+          "The producer response supplied new source-backed information for this dependency.",
+        value: { sourceId: args.sourceId },
+        resolutionSource: "external",
+        resolvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(coordinationDependencies.id, dependency.id));
+    await db
+      .update(questions)
+      .set({
+        status: "answered",
+        answeredAt: new Date(),
+        sourceId: args.sourceId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(questions.workspaceId, args.workspaceId),
+          eq(questions.jobId, args.jobId),
+          eq(questions.fieldKey, dependency.key),
+          eq(questions.status, "asked"),
+        ),
+      );
+  }
+  const unresolvedExternal = deps.filter(
+    (item) =>
+      item.owner === "external" &&
+      item.status === "needs_external" &&
+      !resolvedKeys.has(item.key),
+  );
+  await db
+    .update(coordinationObjectives)
+    .set({
+      state: "ready_to_advance",
+      summary: args.extraction.summary,
+      nextAction: unresolvedExternal.length
+        ? "Review what changed and decide whether the remaining external questions still matter."
+        : "Review the resolved terms and choose the next booking step.",
+      completedSteps: [
+        ...objective.completedSteps,
+        "Reconciled the producer response against the objective",
+      ],
+      updatedAt: new Date(),
+    })
+    .where(eq(coordinationObjectives.id, objective.id));
+  const [action] = await db
     .select()
     .from(actions)
     .where(
       and(
         eq(actions.workspaceId, args.workspaceId),
-        eq(actions.deduplicationKey, deduplicationKey),
+        eq(actions.deduplicationKey, `advance-inquiry:${args.jobId}`),
       ),
     )
     .limit(1);
-  if (existing) return true;
-  const [producer] = args.producerId
-    ? await db
-        .select()
-        .from(people)
-        .where(
-          and(
-            eq(people.id, args.producerId),
-            eq(people.workspaceId, args.workspaceId),
-          ),
-        )
-        .limit(1)
-    : [];
-  const questionIds: string[] = [];
-  for (const item of actionable) {
-    const questionId = id("question");
-    questionIds.push(questionId);
-    await db.insert(questions).values({
-      id: questionId,
+  if (action) {
+    await db.insert(actionEvents).values({
+      id: id("aev"),
       workspaceId: args.workspaceId,
-      jobId: args.jobId,
-      fieldKey: item.fieldKey,
-      question: item.suggestedQuestion!,
-      whyItMatters: item.reason,
-      recipientPersonId: producer?.id ?? null,
+      actionId: action.id,
+      type: "producer_response_reconciled",
+      fromStatus: action.status,
+      toStatus: "open",
+      metadata: { sourceId: args.sourceId, resolvedKeys: [...resolvedKeys] },
     });
+    await db
+      .update(actions)
+      .set({
+        kind: "advance_inquiry",
+        title: "Review the producer’s update",
+        explanation: args.extraction.summary,
+        recommendation: unresolvedExternal.length
+          ? "Review the updated terms and remaining questions as one coordination decision."
+          : "Review the updated terms and advance the booking decision.",
+        status: "open",
+        executionStatus: "not_requested",
+        resolutionReason: null,
+        resolvedAt: null,
+        requiresApproval: false,
+        preparedContent: null,
+        payload: { objectiveId: objective.id, sourceId: args.sourceId },
+        updatedAt: new Date(),
+      })
+      .where(eq(actions.id, action.id));
   }
-  const actionId = id("act");
-  const communicationId = id("communication");
-  const body = args.body?.trim() || args.extraction.preparedResponse.body;
-  await db.insert(actions).values({
-    id: actionId,
-    workspaceId: args.workspaceId,
-    jobId: args.jobId,
-    personId: producer?.id ?? null,
-    kind: "producer_coordination",
-    title: `Review note to ${producer?.name ?? "the producer"}`,
-    explanation: actionable.length
-      ? actionable.map((item) => item.label).join(" and ") +
-        " need clarification before the opportunity can move forward."
-      : "Repd prepared a response to the opportunity for review.",
-    recommendation:
-      args.extraction.recommendations[0] ??
-      "Review the prepared response before handing it off.",
-    priority: actionable.length ? "blocking" : "routine",
-    status: "pending_approval",
-    requiresApproval: true,
-    executionStatus: "not_requested",
-    deduplicationKey,
-    idempotencyKey: `communication:${communicationId}`,
-    payload: {
-      communicationId,
-      questionIds,
-      fieldKeys,
-      assessment: args.extraction.assessment,
-      sourceId: args.sourceId,
-    },
-    resolutionCondition: { type: "questions_answered", questionIds },
-    preparedContent: body,
-    reevaluatedAt: new Date(),
-  });
-  await db.insert(communications).values({
-    id: communicationId,
-    workspaceId: args.workspaceId,
-    jobId: args.jobId,
-    actionId,
-    recipientPersonId: producer?.id ?? null,
-    toEmail: producer?.email ?? null,
-    subject: args.subject?.trim() || args.extraction.preparedResponse.subject,
-    body,
-  });
-  return true;
 }
 
 export async function prepareCoordination(args: {

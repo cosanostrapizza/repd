@@ -1,6 +1,6 @@
 # Repd Project State
 
-Milestone 2 checkpoint — 2026-11-17
+Coordination-intelligence iteration — 2026-11-17
 
 ## 1. Product vision and UX principles
 
@@ -36,6 +36,7 @@ Key files:
 - `src/lib/agent-actions.ts` — intake review, communication, approval/handoff, and invoice mutations.
 - `src/lib/action-engine.ts` — deterministic action generation and reevaluation.
 - `src/lib/services/intake.ts` — source persistence, tracked AI calls, reconciliation, and coordination preparation.
+- `coordination_objectives`, `coordination_dependencies`, and `coordination_date_options` — the durable outcome, ownership/evidence, and alternative-date layer for new inquiries.
 - `src/lib/services/requirements.ts` — contextual missing-information policy.
 - `src/lib/ai/provider.ts`, `schemas.ts`, `prompts.ts` — provider adapter, Zod contracts, and prompts.
 - `src/app/(workspace)/page.tsx` — grounded Home briefing.
@@ -54,20 +55,26 @@ Implemented:
 - First/second holds, confirmed bookings, release/conversion history, conflicts, month/agenda calendar.
 - Durable actions with deduplication, resolution conditions, approval/execution separation, and events.
 - Pasted inquiry and producer-response sources, structured business briefing, optional correction/rejection, and deliberate merge.
-- Opportunity summaries, producer requests, relevant gaps, grounded risks, prioritized recommendations, suggested workflow state, and prepared responses in one validated intake result.
+- Opportunity summaries, producer requests, relevant gaps, grounded risks, prioritized recommendations, and suggested workflow state in one validated intake result. Communication is generated only after internal checks and creative decisions.
 - Explicit requested-date alternatives and hold-request intent. Alternative dates do not become ranges; requested holds do not become active holds.
 - Accepted source-backed field revisions and contextual requirements.
 - Prepared producer emails with editing, AI revision, approval, copy/`mailto:`, explicit sent confirmation, and question tracking.
 - Specialized hold-conflict and invoice-preparation workspaces.
 - Editable internal invoice previews with billing details, line item, payment terms, and notes.
 - Grounded daily briefing and read-first living job briefs.
+- One durable `advance_inquiry` objective per job, with explicit state, outcome, completed steps, next action, evidence, dependency ownership, and retry-safe deduplication.
+- Normalized alternative date options with tentative/requested/granted semantics. A requested hold remains unbooked until the creative explicitly offers it; each authorized date creates only its corresponding hold.
+- Proposed budget ranges remain separate from agreed creative fees. Generated provisional titles remain distinguishable from source-confirmed/manual titles.
+- Deterministic checks of Repd jobs, active holds, and client history run before creative decisions. Results disclose that no external calendar or contract repository was checked.
+- A focused new-inquiry workspace groups interest, per-date hold handling, and category-conflict judgment. Communication is generated only after these decisions and reflects them exactly.
+- Producer response reconciliation resolves matching objective dependencies, answers related questions, preserves prior user decisions, and advances one coherent action.
 
 Limits:
 
 - No provider-backed email delivery or inbound sync; responses are pasted manually.
 - Invoice output is an internal draft/status, not a document or accounting workflow.
 - Existing-job matching is lexical title/client overlap.
-- Agency extraction is not fully persisted into relationship records.
+- Accepted agency extraction is persisted as an organization, job participant, and producer affiliation; broader agency-role reconciliation remains limited.
 - Requirements and deterministic actions cover a deliberately small field/rule set.
 - No uploads, attachments, OCR, background jobs, hosted DB adapter, or operational monitoring.
 
@@ -76,6 +83,8 @@ Limits:
 Core identity: `users`, `workspaces`, `workspace_members`.
 
 Business records: `jobs`, `people`, `organizations`, `affiliations`, `job_participants`, `holds`, `activities`.
+
+Coordination: `coordination_objectives`, `coordination_dependencies`, `coordination_date_options`. These intentionally model only the new-inquiry outcome rather than a generic workflow engine.
 
 Understanding/provenance: `sources`, `intake_reviews`, `job_fields`, `job_field_revisions`, `ai_runs`.
 
@@ -90,6 +99,7 @@ Important transitions:
 - Action supports `open`, `deferred`, `pending_approval`, `approved`, `executing`, and `resolved`. Current user flows defer, dismiss/resolve, or approve actions; no workflow currently advances an action status into `executing`. `execution_status` separately supports `not_requested`, `ready`, `executing`, `succeeded`, and `failed`.
 - Question: `draft → asked → answered`; it may instead become `obsolete`.
 - Communication: `draft → approved → copied|opened_in_client → sent`; `sent` requires explicit user confirmation in the current implementation.
+- Advance inquiry objective: `awaiting_decisions → preparing_response → awaiting_approval → awaiting_external|ready_to_advance`; declines become `declined` only after the user confirms sending. Drafting failures enter `needs_attention` without losing saved decisions.
 - Invoice: completed job with `invoice_status=not_ready` creates an action; preparation creates/marks an internal draft `ready`, sets the job invoice `ready`, and resolves the action.
 - AI run: `running → succeeded|failed` with durable diagnostic metadata.
 
@@ -104,7 +114,7 @@ OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-6.2-astra
 ```
 
-`OpenAIProvider` calls `responses.parse` with Zod structured-output schemas, `store: false`, two SDK retries, and a 45-second timeout. Inquiry analysis now returns the briefing and source-backed extraction together so the prepared response and recommendation use the same grounded understanding. Tracked runs persist purpose, provider/model, schema version, request ID, duration, input hash, output, and failures.
+`OpenAIProvider` calls `responses.parse` with Zod structured-output schemas, `store: false`, two SDK retries, and a 45-second timeout. Inquiry analysis returns the briefing and source-backed extraction together; a later drafting call receives that accepted understanding plus internal checks and stored creative decisions. Tracked runs persist purpose, provider/model, schema version, request ID, duration, input hash, output, and failures.
 
 AI currently supports opportunity/update briefings, source-backed extraction, missing-information analysis, producer email drafting, and draft revision. Candidate scoring, requirement classification, conflicts, hold creation, action resolution, authorization, and persistence decisions remain deterministic.
 
@@ -116,7 +126,7 @@ Automated tests use `FixtureAIProvider` only when `AI_FIXTURE_MODE=test` and the
 - PGlite is the only wired runtime database client; hosted PostgreSQL is deferred.
 - RLS transaction context is not active under the local owner connection.
 - Rejected extracted fields do not receive standalone rejected revision records.
-- Requested-date alternatives are preserved in the provenance layer rather than a dedicated normalized scheduling-request table.
+- External calendars, inboxes, contract files, and agreement repositories are not connected. “No record found” is not treated as proof of no conflict.
 - Source immutability is conventional, not database-enforced.
 - Supersession fields exist without a complete supersede workflow.
 - Workspace action reevaluation is a full scan.

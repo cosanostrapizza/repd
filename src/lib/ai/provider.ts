@@ -69,6 +69,12 @@ class FixtureAIProvider implements AIProvider {
     schema: z.ZodType<T>;
     schemaName: string;
   }): Promise<ModelResult<T>> {
+    if (input.includes("[fixture:fail]"))
+      throw new AIProviderError(
+        "Deterministic provider failure for regression testing.",
+        "fixture_failure",
+        "fixture-request-failed",
+      );
     const extracted = (
       value: unknown,
       state = value == null ? "missing" : "proposed",
@@ -87,7 +93,9 @@ class FixtureAIProvider implements AIProvider {
     let fixture: unknown;
     if (purpose === "inquiry_extraction") {
       const adidas = /adidas/i.test(input);
+      const newBalance = /new balance/i.test(input);
       const response =
+        /reviewed against this existing job/i.test(input) &&
         /worldwide|usage|licen[cs]/i.test(input) &&
         /twelve|12 month|one year/i.test(input);
       fixture = {
@@ -96,13 +104,23 @@ class FixtureAIProvider implements AIProvider {
           ? "A producer supplied usage details for the existing campaign."
           : adidas
             ? "Jamie is checking availability for an Adidas campaign on one of two possible dates and has asked for first holds while commercial terms are still taking shape."
-            : "A commercial campaign inquiry with dates, fee, and producer details; usage is not specified.",
+            : newBalance
+              ? "Sarah at Wieden+Kennedy is exploring a one-day New Balance shoot on December 16 or 17 and is requesting second holds. The indicative photography budget is $6–8k, with licensing and treatment expectations unresolved."
+              : "A commercial campaign inquiry with dates, fee, and producer details; usage is not specified.",
         assessment: response
           ? "The usage response resolves the main licensing question; the stored job should be updated without changing unrelated terms."
-          : "This is an early commercial inquiry. The requested dates and fee can be considered, but usage must be defined before the scope can be evaluated.",
+          : newBalance
+            ? "This is an early commercial opportunity. Repd should check the two alternative dates and relevant history before Alex decides whether to engage or grant either requested second hold."
+            : "This is an early commercial inquiry. The requested dates and fee can be considered, but usage must be defined before the scope can be evaluated.",
         producerRequests: response
           ? ["Apply the clarified usage to the existing campaign."]
-          : ["Consider a first hold for the proposed shoot dates."],
+          : newBalance
+            ? [
+                "Consider second holds for December 16 and 17.",
+                "Confirm interest and any New Balance category conflicts.",
+                "Request treatment details if interested.",
+              ]
+            : ["Consider a first hold for the proposed shoot dates."],
         missingInformation: response
           ? []
           : [
@@ -111,33 +129,58 @@ class FixtureAIProvider implements AIProvider {
                 label: "Usage rights",
                 reason:
                   "Media, territory, and term affect the commercial license.",
+                owner: "external",
                 askExternalParty: true,
                 suggestedQuestion:
                   "Could you confirm the intended media, territory, and usage term?",
               },
+              ...(newBalance
+                ? [
+                    {
+                      fieldKey: "budgetIncludesUsage",
+                      label: "Budget and usage",
+                      reason:
+                        "The indicative photography budget is not clear about licensing.",
+                      owner: "external" as const,
+                      askExternalParty: true,
+                      suggestedQuestion:
+                        "Does the photography budget include usage, or can licensing be separated?",
+                    },
+                    {
+                      fieldKey: "treatmentExpectations",
+                      label: "Treatment expectations",
+                      reason:
+                        "The expected treatment scope and timing affect whether Alex can proceed.",
+                      owner: "external" as const,
+                      askExternalParty: true,
+                      suggestedQuestion:
+                        "Could you send the deck and confirm what you need for the treatment?",
+                    },
+                  ]
+                : []),
             ],
         risks: response
           ? []
-          : ["The hold has been requested but has not been granted."],
+          : [
+              "The hold has been requested but has not been granted.",
+              ...(newBalance
+                ? [
+                    "Category restrictions cannot be inferred from job history alone.",
+                  ]
+                : []),
+            ],
         recommendations: response
           ? ["Accept the clarified usage into the job brief."]
           : [
               "Check the requested dates against existing commitments.",
-              "Decide whether to offer the requested hold.",
-              "Clarify media, territory, and usage term.",
+              "Decide whether to explore the opportunity and offer the requested holds.",
+              newBalance
+                ? "Clarify licensing within the budget and treatment expectations."
+                : "Clarify media, territory, and usage term.",
             ],
         suggestedNextWorkflowState: response
           ? "review_update"
           : "check_availability",
-        preparedResponse: {
-          subject: adidas
-            ? "Adidas campaign — dates and usage"
-            : "Nike Spring Campaign — availability and usage",
-          body: adidas
-            ? "Hi Jamie,\n\nThanks so much for thinking of me for this. I’m checking December 8 and 9 now. Could you confirm the intended media, territory, usage term, and whether OOH is part of the plan? That will help me evaluate the scope and fee properly.\n\nBest,\nAlex"
-            : "Hi Maya,\n\nThanks for thinking of me for this. I’m reviewing the proposed dates now. Could you confirm the intended media, territory, and usage term? That will help me evaluate the scope and fee properly.\n\nBest,\nAlex",
-          tone: "warm",
-        },
         requestedDates: adidas
           ? [
               {
@@ -163,27 +206,56 @@ class FixtureAIProvider implements AIProvider {
                 },
               },
             ]
-          : [
-              {
-                label: "March 18–19, 2027",
-                start: "2027-03-18T12:00:00.000Z",
-                end: "2027-03-19T12:00:00.000Z",
-                relationship: "range",
-                confidence: 0.96,
-                evidence: {
-                  quote: "March 18–19",
-                  rationale: "The message describes a continuous date range.",
+          : newBalance
+            ? [
+                {
+                  label: "December 16, 2026",
+                  start: "2026-12-16T14:00:00.000Z",
+                  end: "2026-12-17T00:00:00.000Z",
+                  relationship: "alternative",
+                  confidence: 0.98,
+                  evidence: {
+                    quote: "ideally the 16th or 17th",
+                    rationale:
+                      "The dates are alternatives for a one-day shoot; the year is the obvious next December from the inquiry date.",
+                  },
                 },
-              },
-            ],
+                {
+                  label: "December 17, 2026",
+                  start: "2026-12-17T14:00:00.000Z",
+                  end: "2026-12-18T00:00:00.000Z",
+                  relationship: "alternative",
+                  confidence: 0.98,
+                  evidence: {
+                    quote: "ideally the 16th or 17th",
+                    rationale:
+                      "The dates are alternatives for a one-day shoot; the year is the obvious next December from the inquiry date.",
+                  },
+                },
+              ]
+            : [
+                {
+                  label: "March 18–19, 2027",
+                  start: "2027-03-18T12:00:00.000Z",
+                  end: "2027-03-19T12:00:00.000Z",
+                  relationship: "range",
+                  confidence: 0.96,
+                  evidence: {
+                    quote: "March 18–19",
+                    rationale: "The message describes a continuous date range.",
+                  },
+                },
+              ],
         holdRequest: {
           requested: !response,
-          kind: response ? null : "first",
+          kind: response ? null : newBalance ? "second" : "first",
           dates: response
             ? []
             : adidas
               ? ["December 8", "December 9"]
-              : ["March 18–19, 2027"],
+              : newBalance
+                ? ["December 16, 2026", "December 17, 2026"]
+                : ["March 18–19, 2027"],
           evidence: response
             ? null
             : {
@@ -191,36 +263,93 @@ class FixtureAIProvider implements AIProvider {
                 rationale: "The producer requested a hold; it was not granted.",
               },
         },
+        budgetRange: newBalance
+          ? {
+              minCents: 600000,
+              maxCents: 800000,
+              currency: "USD",
+              includesUsage:
+                response &&
+                /usage (?:will be |is )?(?:separate|separated)/i.test(input)
+                  ? false
+                  : null,
+              state: "proposed",
+              confidence: 0.98,
+              evidence: {
+                quote: "$6–8k for photography",
+                rationale:
+                  "This is an indicative photography budget range, not an agreed creative fee.",
+              },
+            }
+          : {
+              minCents: null,
+              maxCents: null,
+              currency: "USD",
+              includesUsage: null,
+              state: "missing",
+              confidence: 0,
+              evidence: null,
+            },
         jobTitle: extracted(
-          adidas ? "Adidas Campaign" : "Nike Spring Campaign",
+          adidas
+            ? "Adidas Campaign"
+            : newBalance
+              ? "New Balance Campaign"
+              : "Nike Spring Campaign",
         ),
+        jobTitleSource: newBalance ? "generated" : "source_confirmed",
         jobType: extracted("commercial"),
-        clientName: extracted(adidas ? "Adidas" : "Nike"),
+        clientName: extracted(
+          adidas ? "Adidas" : newBalance ? "New Balance" : "Nike",
+        ),
         agencyName: extracted("Wieden+Kennedy"),
-        producerName: extracted(adidas ? "Jamie" : "Maya Chen"),
-        producerEmail: adidas ? extracted(null) : extracted("maya@example.com"),
-        shootStart: adidas
-          ? extracted(null)
-          : extracted("2027-03-18T12:00:00.000Z"),
-        shootEnd: adidas
-          ? extracted(null)
-          : extracted("2027-03-19T12:00:00.000Z"),
+        producerName: extracted(
+          adidas ? "Jamie" : newBalance ? "Sarah" : "Maya Chen",
+        ),
+        producerEmail:
+          adidas || newBalance
+            ? extracted(null)
+            : extracted("maya@example.com"),
+        shootStart:
+          adidas || newBalance
+            ? extracted(null)
+            : extracted("2027-03-18T12:00:00.000Z"),
+        shootEnd:
+          adidas || newBalance
+            ? extracted(null)
+            : extracted("2027-03-19T12:00:00.000Z"),
         dateOnly: true,
-        location: extracted("Brooklyn, NY"),
-        feeCents: extracted(adidas ? 350000 : 850000),
+        location: extracted(
+          newBalance ? "Manhattan or upstate New York" : "Brooklyn, NY",
+        ),
+        feeCents: newBalance
+          ? extracted(null)
+          : extracted(adidas ? 350000 : 850000),
         currency: extracted("USD"),
         usageTerms: response
           ? extracted("Worldwide digital and social, 12 months")
           : extracted(null),
         deliverables: extracted(
-          adidas
-            ? "Approximately 15 finals"
-            : "Campaign stills and select social crops",
+          newBalance
+            ? "20–25 selects; basic retouching"
+            : adidas
+              ? "Approximately 15 finals"
+              : "Campaign stills and select social crops",
         ),
         paymentTerms: adidas ? extracted(null) : extracted("Net 30"),
         bookingStatus: extracted("unbooked"),
         lifecycleStatus: extracted("inquiry"),
-        relevantNotes: [],
+        relevantNotes: newBalance
+          ? [
+              "One-day shoot",
+              "Paid social, web, and possible retail usage",
+              ...(response && /treatment/i.test(input)
+                ? [
+                    "Treatment expectations were supplied in the producer response.",
+                  ]
+                : []),
+            ]
+          : [],
         suggestedMatchTitle: response ? "Nike Spring Campaign" : null,
         suggestedMatchReason: response
           ? "The campaign title and producer match."
@@ -246,7 +375,46 @@ class FixtureAIProvider implements AIProvider {
         recommendedNextStep:
           "Review the concise usage question prepared for Maya.",
       };
-    else
+    else if (purpose === "objective_communication") {
+      const parsed = JSON.parse(input) as {
+        job: { title: string };
+        producer: { name: string } | null;
+        decisions: {
+          interest: "yes" | "maybe" | "no";
+          categoryConflict: string | null;
+          dates: Array<{
+            label: string;
+            decision: "offer" | "defer" | "decline";
+            holdPriority: string | null;
+          }>;
+        };
+        externalQuestions: Array<{
+          fieldKey: string;
+          question: string;
+          whyItMatters: string;
+        }>;
+      };
+      const name = parsed.producer?.name ?? "there";
+      const offered = parsed.decisions.dates.filter(
+        (date) => date.decision === "offer",
+      );
+      const conflictQualification =
+        parsed.decisions.categoryConflict === "none_known"
+          ? "I’m not aware of a category conflict, though I still need to confirm against any applicable agreements."
+          : parsed.decisions.categoryConflict
+            ? "I’m still reviewing potential category restrictions, so I can’t confirm clearance yet."
+            : "";
+      fixture = {
+        subject: `${parsed.job.title} — availability and next steps`,
+        body:
+          parsed.decisions.interest === "no"
+            ? `Hi ${name},\n\nThanks so much for thinking of me for ${parsed.job.title}. I’m going to pass this time, but I really appreciate you reaching out and hope we can find another opportunity to work together.\n\nBest,\nAlex`
+            : `Hi ${name},\n\nThanks for thinking of me for ${parsed.job.title}. I’m ${parsed.decisions.interest === "yes" ? "interested in exploring it" : "interested depending on the final terms"}.${offered.length ? ` I can offer ${offered.map((date) => `a ${date.holdPriority ?? "requested"} hold on ${date.label}`).join(" and ")}.` : " I’m not able to commit either requested date yet."}${conflictQualification ? ` ${conflictQualification}` : ""}\n\n${parsed.externalQuestions.map((question) => question.question).join(" ")}\n\nBest,\nAlex`,
+        tone: "warm",
+        questions:
+          parsed.decisions.interest === "no" ? [] : parsed.externalQuestions,
+      };
+    } else
       fixture = {
         subject: "Nike Spring Campaign — usage details",
         body: "Hi Maya,\n\nThanks for sending this through. Could you confirm the intended media, territory, and usage term for the campaign? That will help me evaluate the scope and fee properly.\n\nBest,\nAlex",

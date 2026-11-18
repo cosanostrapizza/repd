@@ -9,12 +9,16 @@ import {
   UserRound,
 } from "lucide-react";
 import { ActionList } from "@/components/action-list";
+import { ObjectiveDecisionForm } from "@/components/agent/objective-decision-form";
 import { HoldForm, JobForm, ParticipantForm } from "@/components/forms";
 import { db } from "@/db/client";
 import {
   actions,
   activities,
   communications,
+  coordinationDateOptions,
+  coordinationDependencies,
+  coordinationObjectives,
   holds,
   jobFieldRevisions,
   jobFields,
@@ -62,6 +66,7 @@ export default async function JobDetail({
     openQuestions,
     documents,
     messages,
+    objectives,
   ] = await Promise.all([
     db
       .select()
@@ -152,7 +157,40 @@ export default async function JobDetail({
         ),
       )
       .orderBy(desc(communications.createdAt)),
+    db
+      .select()
+      .from(coordinationObjectives)
+      .where(
+        and(
+          eq(coordinationObjectives.jobId, id),
+          eq(coordinationObjectives.workspaceId, ctx.workspaceId),
+        ),
+      )
+      .orderBy(desc(coordinationObjectives.updatedAt)),
   ]);
+  const objective = objectives.find((item) => item.kind === "advance_inquiry");
+  const [objectiveDependencies, objectiveDates] = objective
+    ? await Promise.all([
+        db
+          .select()
+          .from(coordinationDependencies)
+          .where(
+            and(
+              eq(coordinationDependencies.objectiveId, objective.id),
+              eq(coordinationDependencies.workspaceId, ctx.workspaceId),
+            ),
+          ),
+        db
+          .select()
+          .from(coordinationDateOptions)
+          .where(
+            and(
+              eq(coordinationDateOptions.objectiveId, objective.id),
+              eq(coordinationDateOptions.workspaceId, ctx.workspaceId),
+            ),
+          ),
+      ])
+    : [[], []];
   const missing = fieldRows.filter(
     ({ field, revision }) =>
       field.requirementState === "required_now" &&
@@ -174,8 +212,9 @@ export default async function JobDetail({
     (item) => item.kind === "producer_coordination",
   );
   const sentMessage = messages.find((message) => message.status === "sent");
-  const assessment =
-    job.lifecycleStatus === "completed" && job.invoiceStatus === "not_ready"
+  const assessment = objective
+    ? objective.summary
+    : job.lifecycleStatus === "completed" && job.invoiceStatus === "not_ready"
       ? "The work is complete and the invoice still needs to be prepared."
       : sentMessage && openQuestions.length
         ? `You’re waiting on a producer response to ${openQuestions.length === 1 ? "one open question" : `${openQuestions.length} open questions`}.`
@@ -209,6 +248,14 @@ export default async function JobDetail({
       label: "Creative fee",
       value: formatMoney(job.feeCents, job.currency),
       state: job.feeCents ? job.feeState : "missing",
+    },
+    {
+      label: "Indicative budget",
+      value:
+        job.proposedBudgetMinCents != null && job.proposedBudgetMaxCents != null
+          ? `${formatMoney(job.proposedBudgetMinCents, job.currency)}–${formatMoney(job.proposedBudgetMaxCents, job.currency)}`
+          : "Not known",
+      state: job.proposedBudgetMinCents != null ? "proposed" : "missing",
     },
     {
       label: "Usage",
@@ -250,6 +297,9 @@ export default async function JobDetail({
                 >
                   {bookingLabels[job.bookingStatus]}
                 </span>
+                {job.titleSource === "generated" && (
+                  <span className="badge">Provisional title</span>
+                )}
               </div>
             </div>
             <div className="job-head-actions">
@@ -282,12 +332,104 @@ export default async function JobDetail({
         </section>
         <div className="living-brief">
           <main>
+            {objective && (
+              <section className="section card objective-workspace">
+                <div className="objective-head">
+                  <div>
+                    <p className="eyebrow">Active coordination objective</p>
+                    <h2>{objective.title}</h2>
+                    <p>{objective.outcome}</p>
+                  </div>
+                  <span className={`state-pill ${objective.state}`}>
+                    {objective.state.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <div
+                  className="objective-progress"
+                  aria-label="Objective progress"
+                >
+                  {["Understand", "Check", "Decide", "Prepare", "Wait"].map(
+                    (step, index) => (
+                      <span
+                        key={step}
+                        className={
+                          index <
+                          (objective.state === "awaiting_decisions"
+                            ? 2
+                            : objective.state === "preparing_response"
+                              ? 3
+                              : objective.state === "awaiting_approval"
+                                ? 4
+                                : 5)
+                            ? "done"
+                            : ""
+                        }
+                      >
+                        {step}
+                      </span>
+                    ),
+                  )}
+                </div>
+                <div className="objective-checks">
+                  <p className="eyebrow">Repd has checked</p>
+                  {objectiveDependencies
+                    .filter((dependency) => dependency.owner === "repd")
+                    .map((dependency) => (
+                      <article key={dependency.id}>
+                        <CheckCircle2 size={18} />
+                        <div>
+                          <strong>{dependency.label}</strong>
+                          <p>{dependency.result}</p>
+                          <span className={`state-pill ${dependency.status}`}>
+                            {dependency.status.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
+                </div>
+                {(objective.state === "awaiting_decisions" ||
+                  objective.state === "needs_attention") && (
+                  <div className="objective-questionnaire">
+                    <p className="eyebrow">A few decisions before I reply</p>
+                    <ObjectiveDecisionForm
+                      objectiveId={objective.id}
+                      askCategoryConflict={objectiveDependencies.some(
+                        (dependency) => dependency.key === "category_conflicts",
+                      )}
+                      dateOptions={objectiveDates.map((option) => ({
+                        id: option.id,
+                        label: option.label,
+                        holdRequested: option.holdRequested,
+                        holdPriority: option.holdPriority,
+                        holdState: option.holdState,
+                        decision: option.decision,
+                        checkResult:
+                          objectiveDependencies.find(
+                            (dependency) =>
+                              dependency.key === `availability:${option.id}`,
+                          )?.result ?? "Not checked",
+                      }))}
+                    />
+                  </div>
+                )}
+                {!["awaiting_decisions", "needs_attention"].includes(
+                  objective.state,
+                ) && (
+                  <div className="objective-next">
+                    <p className="eyebrow">Next appropriate action</p>
+                    <strong>{objective.nextAction}</strong>
+                  </div>
+                )}
+              </section>
+            )}
             {actionRows.length > 0 && (
               <section className="section card">
                 <div className="card-pad section-title">
                   <div>
                     <p className="eyebrow">What needs to happen next</p>
-                    <h2>Prepared decisions</h2>
+                    <h2>
+                      {objective ? "Prepared work" : "Prepared decisions"}
+                    </h2>
                   </div>
                 </div>
                 <ActionList rows={actionRows} />

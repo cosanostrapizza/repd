@@ -23,6 +23,7 @@ export const inquiryExtractionSchema = z.object({
       fieldKey: z.string(),
       label: z.string(),
       reason: z.string(),
+      owner: z.enum(["repd", "creative", "external"]),
       askExternalParty: z.boolean(),
       suggestedQuestion: z.string().nullable(),
     }),
@@ -36,11 +37,6 @@ export const inquiryExtractionSchema = z.object({
     "review_update",
     "ready_to_confirm",
   ]),
-  preparedResponse: z.object({
-    subject: z.string(),
-    body: z.string(),
-    tone: z.enum(["warm", "direct", "concise"]),
-  }),
   requestedDates: z.array(
     z.object({
       label: z.string(),
@@ -57,7 +53,17 @@ export const inquiryExtractionSchema = z.object({
     dates: z.array(z.string()),
     evidence: evidenceSchema.nullable(),
   }),
+  budgetRange: z.object({
+    minCents: z.number().int().nullable(),
+    maxCents: z.number().int().nullable(),
+    currency: z.string(),
+    includesUsage: z.boolean().nullable(),
+    state: z.enum(["proposed", "unconfirmed", "missing"]),
+    confidence: z.number().min(0).max(1),
+    evidence: evidenceSchema.nullable(),
+  }),
   jobTitle: extractedValue(z.string()),
+  jobTitleSource: z.enum(["generated", "source_confirmed"]),
   jobType: extractedValue(
     z.enum(["commercial", "editorial", "portrait", "event", "other"]),
   ),

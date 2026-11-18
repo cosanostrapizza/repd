@@ -346,6 +346,133 @@ p {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.objective-workspace {
+  overflow: hidden;
+}
+.objective-head {
+  padding: 26px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.objective-head p {
+  color: var(--muted);
+  max-width: 700px;
+  margin-bottom: 0;
+}
+.objective-progress {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 18px 26px;
+  background: #fafbf7;
+  border-bottom: 1px solid var(--line);
+}
+.objective-progress span {
+  border-top: 4px solid #d9ddd5;
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.objective-progress span.done {
+  border-color: var(--accent-dark);
+  color: var(--ink);
+}
+.objective-checks,
+.objective-questionnaire,
+.objective-next {
+  padding: 24px 26px;
+}
+.objective-checks {
+  border-bottom: 1px solid var(--line);
+}
+.objective-checks article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #eceee8;
+}
+.objective-checks article:last-child {
+  border: 0;
+}
+.objective-checks article p {
+  color: var(--muted);
+  margin: 3px 0 8px;
+}
+.objective-decisions {
+  display: grid;
+  gap: 18px;
+}
+.decision-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 18px;
+  margin: 0;
+}
+.decision-fieldset legend {
+  font-family: Georgia, serif;
+  font-size: 22px;
+  padding: 0 8px;
+}
+.decision-fieldset > p {
+  color: var(--muted);
+  margin-top: 0;
+}
+.decision-option {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #e5e7e1;
+  border-radius: 10px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.decision-option:has(input:checked) {
+  border-color: var(--accent-dark);
+  background: #f3f8e9;
+}
+.decision-option input {
+  margin-top: 3px;
+}
+.decision-option span,
+.date-decision > div {
+  display: grid;
+  gap: 3px;
+}
+.decision-option small,
+.date-decision small,
+.date-decision span {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.compact-option {
+  display: inline-flex;
+  margin-right: 6px;
+}
+.date-decision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  gap: 18px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid #eceee8;
+}
+.date-decision:last-child {
+  border-bottom: 0;
+}
+.objective-next {
+  background: #f3f8e9;
+}
+.objective-next strong {
+  display: block;
+  font-family: Georgia, serif;
+  font-size: 21px;
+}
 .briefing {
   background: #1d2c24;
   color: white;
@@ -1330,6 +1457,23 @@ textarea {
   .opportunity-list > div:nth-child(even) {
     padding-left: 0;
     border-left: 0;
+  }
+  .objective-head {
+    flex-direction: column;
+  }
+  .objective-progress {
+    overflow-x: auto;
+    grid-template-columns: repeat(5, minmax(82px, 1fr));
+  }
+  .date-decision {
+    grid-template-columns: 1fr;
+  }
+  .date-decision select {
+    width: 100%;
+  }
+  .compact-option {
+    display: flex;
+    margin-right: 0;
   }
 }
 @media (max-width: 760px) {

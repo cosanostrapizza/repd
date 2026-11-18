@@ -26,19 +26,50 @@ describe("structured AI boundaries", () => {
       risks: [],
       recommendations: ["Clarify usage"],
       suggestedNextWorkflowState: "clarify_terms",
-      preparedResponse: {
-        subject: "Spring campaign",
-        body: "Thanks for reaching out. Could you confirm usage?",
-        tone: "warm",
-      },
-      requestedDates: [],
+      requestedDates: [
+        {
+          label: "December 16",
+          start: "2026-12-16T14:00:00.000Z",
+          end: "2026-12-17T00:00:00.000Z",
+          relationship: "alternative",
+          confidence: 0.9,
+          evidence: {
+            quote: "December 16 or 17",
+            rationale: "Two one-day alternatives",
+          },
+        },
+        {
+          label: "December 17",
+          start: "2026-12-17T14:00:00.000Z",
+          end: "2026-12-18T00:00:00.000Z",
+          relationship: "alternative",
+          confidence: 0.9,
+          evidence: {
+            quote: "December 16 or 17",
+            rationale: "Two one-day alternatives",
+          },
+        },
+      ],
       holdRequest: {
-        requested: false,
-        kind: null,
-        dates: [],
-        evidence: null,
+        requested: true,
+        kind: "second",
+        dates: ["December 16", "December 17"],
+        evidence: {
+          quote: "second hold on both dates",
+          rationale: "Requested, not granted",
+        },
+      },
+      budgetRange: {
+        minCents: 500000,
+        maxCents: 700000,
+        currency: "USD",
+        includesUsage: null,
+        state: "proposed",
+        confidence: 0.9,
+        evidence: { quote: "$5–7k", rationale: "Indicative range" },
       },
       jobTitle: field("Spring campaign"),
+      jobTitleSource: "source_confirmed",
       jobType: field("commercial"),
       clientName: field("Acme"),
       agencyName: field(null),
@@ -53,7 +84,7 @@ describe("structured AI boundaries", () => {
       usageTerms: field(null),
       deliverables: field("10 stills"),
       paymentTerms: field("Net 30"),
-      bookingStatus: field("first_hold"),
+      bookingStatus: field("unbooked"),
       lifecycleStatus: field("inquiry"),
       relevantNotes: [],
       suggestedMatchTitle: null,
@@ -61,6 +92,20 @@ describe("structured AI boundaries", () => {
     });
     expect(parsed.usageTerms.state).toBe("missing");
     expect(parsed.feeCents.value).toBe(500000);
+    expect(parsed.holdRequest.kind).toBe("second");
+    expect(parsed.bookingStatus.value).toBe("unbooked");
+    expect(parsed.requestedDates).toHaveLength(2);
+    expect(
+      parsed.requestedDates.every(
+        (item) => item.relationship === "alternative",
+      ),
+    ).toBe(true);
+    expect(parsed.budgetRange).toMatchObject({
+      minCents: 500000,
+      maxCents: 700000,
+      includesUsage: null,
+      state: "proposed",
+    });
   });
   it("rejects malformed or unsupported model output", () => {
     expect(() =>
@@ -107,6 +152,18 @@ describe("contextual information requirements", () => {
     });
     expect(
       result.find((item) => item.fieldKey === "usageTerms")?.state,
+    ).not.toBe("required_now");
+  });
+  it("does not treat preserved alternative dates as a missing shoot date", () => {
+    const result = evaluateRequirements({
+      jobType: "commercial",
+      lifecycleStatus: "inquiry",
+      shootStart: null,
+      requestedDateCount: 2,
+      usageTerms: null,
+    });
+    expect(
+      result.find((item) => item.fieldKey === "shootStart")?.state,
     ).not.toBe("required_now");
   });
 });

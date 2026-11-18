@@ -127,7 +127,7 @@ export function ReviewAcceptanceForm({
   producerRequests,
   requestedDates,
   holdRequest,
-  preparedResponse,
+  budgetRange,
   fields,
   candidates = [],
 }: {
@@ -143,7 +143,13 @@ export function ReviewAcceptanceForm({
     relationship: "single" | "alternative" | "range";
   }>;
   holdRequest: { requested: boolean; kind: string | null; dates: string[] };
-  preparedResponse: { subject: string; body: string };
+  budgetRange: {
+    minCents: number | null;
+    maxCents: number | null;
+    currency: string;
+    includesUsage: boolean | null;
+    state: string;
+  };
   fields: ReviewField[];
   candidates?: Array<{ jobId: string; title: string; confidence: number }>;
 }) {
@@ -178,6 +184,31 @@ export function ReviewAcceptanceForm({
         <p className="eyebrow">Repd’s understanding</p>
         <p className="briefing-summary">{summary}</p>
       </section>
+      {kind === "producer_response" && (
+        <section className="briefing-block">
+          <p className="eyebrow">Before → after</p>
+          <div className="opportunity-list">
+            {fields
+              .filter(
+                (field) =>
+                  field.value != null &&
+                  field.existing !== undefined &&
+                  String(field.existing ?? "") !== String(field.value),
+              )
+              .map((field) => (
+                <div key={field.key}>
+                  <span>{field.label}</span>
+                  <small>
+                    {field.existing == null
+                      ? "Not known"
+                      : String(field.existing)}
+                  </small>
+                  <strong>→ {formatFact(field)}</strong>
+                </div>
+              ))}
+          </div>
+        </section>
+      )}
       <section className="briefing-block">
         <p className="eyebrow">
           {kind === "producer_response"
@@ -220,6 +251,34 @@ export function ReviewAcceptanceForm({
               <small>Requested—not granted</small>
             </div>
           )}
+          {budgetRange.minCents != null && (
+            <div>
+              <span>Indicative budget</span>
+              <strong>
+                {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: budgetRange.currency,
+                  maximumFractionDigits: 0,
+                }).format(budgetRange.minCents / 100)}
+                {budgetRange.maxCents != null &&
+                budgetRange.maxCents !== budgetRange.minCents
+                  ? `–${new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: budgetRange.currency,
+                      maximumFractionDigits: 0,
+                    }).format(budgetRange.maxCents / 100)}`
+                  : ""}
+              </strong>
+              <small>
+                Proposed budget ·{" "}
+                {budgetRange.includesUsage == null
+                  ? "usage inclusion unresolved"
+                  : budgetRange.includesUsage
+                    ? "includes usage"
+                    : "usage separate"}
+              </small>
+            </div>
+          )}
         </div>
       </section>
       {producerRequests.length > 0 && kind === "producer_response" && (
@@ -245,31 +304,12 @@ export function ReviewAcceptanceForm({
         </ol>
       </section>
       {kind !== "producer_response" && (
-        <section className="briefing-block prepared-response">
-          <div>
-            <p className="eyebrow">Prepared response</p>
-            <p className="trust-note">
-              Editable now and again before handoff. Creating the job does not
-              send it.
-            </p>
-          </div>
-          <div className="field">
-            <label htmlFor="preparedSubject">Subject</label>
-            <input
-              id="preparedSubject"
-              name="preparedSubject"
-              defaultValue={preparedResponse.subject}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="preparedBody">Message</label>
-            <textarea
-              id="preparedBody"
-              name="preparedBody"
-              rows={10}
-              defaultValue={preparedResponse.body}
-            />
-          </div>
+        <section className="briefing-block assessment-block">
+          <p className="eyebrow">Communication comes after your decisions</p>
+          <p>
+            Repd will check its records first, ask for your interest and hold
+            choices, then prepare a response that reflects those decisions.
+          </p>
         </section>
       )}
       <details className="briefing-block correction-panel">

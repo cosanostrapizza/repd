@@ -1,6 +1,6 @@
 # Repd
 
-Repd is an AI-native business manager for independent commercial creatives. The current application turns pasted producer inquiries into source-grounded opportunity briefings, explains what matters, prepares the next move, and keeps consequential changes and outbound communication under the user’s control.
+Repd is an AI-native business manager for independent commercial creatives. The current application turns pasted producer inquiries into source-grounded coordination objectives, checks what it can from internal records, asks the creative only for judgment calls, and prepares the next move under explicit approval.
 
 Milestone 2 is a functional local application. It preserves the Milestone 1 foundation—authentication, workspace isolation, jobs, relationships, holds, calendar, provenance, and deterministic rules—while replacing field-by-field intake with an agent-first briefing and optional correction model.
 
@@ -47,12 +47,13 @@ If AI is not configured or a provider request fails, Repd preserves the pasted s
 ## Implemented workflow
 
 1. Paste an inquiry or create a job manually.
-2. Repd stores the original text, calls OpenAI with a Zod-validated business-briefing schema, and presents a natural-language understanding, compact opportunity facts, assessment, prioritized recommendations, and an editable response.
+2. Repd stores the original text, calls OpenAI with a Zod-validated business-briefing schema, and presents a natural-language understanding, compact opportunity facts, assessment, and prioritized recommendations.
 3. The user can create the job from one coherent review. Field corrections, evidence, confidence, conflicts, and existing-job matching are available through progressive disclosure.
 4. Accepted information updates one durable Job and records source-backed field revisions without converting proposed terms into confirmed business facts.
-5. Requested date alternatives and hold requests remain explicit request intent. They do not create a shoot range or grant a hold. Contextual rules identify important missing information and prepare durable questions and coordination work.
-6. The user can approve, copy, or open the draft in their email client. Repd records delivery only after the user explicitly confirms that it was sent.
-7. A pasted producer response is shown as a coherent update with changed facts and remaining ambiguity. Accepted answers update the job, answer durable questions, and allow obsolete actions to resolve.
+5. Repd creates one “advance inquiry” objective, normalizes date alternatives, preserves a proposed budget range separately from the agreed fee, and runs internal job/hold/history checks with honest integration limits.
+6. The creative decides interest, per-date hold handling, and unresolved category-conflict knowledge in one focused workspace. Only an explicitly offered hold becomes active.
+7. Repd generates the producer response from those decisions, remaining external questions, and internal checks. The user can edit, approve, copy, or open it; delivery is recorded only after explicit sent confirmation.
+8. A pasted producer response is shown as a concise before/after update. Accepted answers resolve objective dependencies and advance the same coordination workflow without recreating stale missing-field tasks.
 
 Home is a deterministic, grounded briefing assembled from stored jobs, actions, waiting questions, and activity. Job Detail leads with the current situation and prepared decisions. Producer coordination, hold conflicts, and invoice preparation have purpose-specific workspaces; invoice drafts now have an editable internal preview.
 
@@ -69,7 +70,7 @@ pnpm db:migrate
 
 `pnpm check` runs type checking, linting, and Vitest together.
 
-The current checkpoint has 16 passing unit/schema/database-integration tests and 12 passing Playwright journeys across desktop Chromium and an iPhone-sized mobile viewport. The inquiry journey uses the Adidas scenario and verifies that alternative dates remain alternatives and a requested hold remains ungranted. Playwright uses the isolated `.repd/e2e.db` database and port 3100; it does not reset the normal local workspace.
+Automated model-dependent tests use a guarded deterministic provider; they do not represent live OpenAI verification. The Playwright suite runs the complete New Balance coordination journey on desktop Chromium and an iPhone-sized mobile viewport, alongside provider-failure, decline, response, authorization, calendar, and existing-job regression coverage. Playwright uses an isolated database and does not reset the normal local workspace.
 
 ## Current boundaries
 

@@ -75,7 +75,7 @@ export default async function ActionWorkspace({
         ),
       )
       .limit(1);
-    const relatedQuestions = job
+    const allJobQuestions = job
       ? await db
           .select()
           .from(questions)
@@ -87,6 +87,12 @@ export default async function ActionWorkspace({
           )
           .orderBy(questions.createdAt)
       : [];
+    const payload = action.payload as { questionIds?: string[] };
+    const relatedQuestions = payload.questionIds?.length
+      ? allJobQuestions.filter((question) =>
+          payload.questionIds!.includes(question.id),
+        )
+      : allJobQuestions;
     const evidence = job
       ? await db
           .select()

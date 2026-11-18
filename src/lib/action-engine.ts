@@ -1,6 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import { db, id } from "@/db/client";
-import { actionEvents, actions, holds, jobs, questions } from "@/db/schema";
+import {
+  actionEvents,
+  actions,
+  coordinationDateOptions,
+  coordinationObjectives,
+  holds,
+  jobs,
+  questions,
+} from "@/db/schema";
 
 type Rule = {
   key: string;
@@ -14,7 +22,12 @@ type Rule = {
   approval?: boolean;
 };
 
-function rulesFor(job: typeof jobs.$inferSelect, hasConflict: boolean): Rule[] {
+function rulesFor(
+  job: typeof jobs.$inferSelect,
+  hasConflict: boolean,
+  hasInquiryObjective: boolean,
+  hasKnownDateOptions: boolean,
+): Rule[] {
   const rules: Rule[] = [];
   if (hasConflict)
     rules.push({
@@ -26,7 +39,11 @@ function rulesFor(job: typeof jobs.$inferSelect, hasConflict: boolean): Rule[] {
       priority: "urgent",
       condition: { type: "no_hold_conflict" },
     });
-  if (job.lifecycleStatus === "inquiry" && !job.usageTerms)
+  if (
+    job.lifecycleStatus === "inquiry" &&
+    !job.usageTerms &&
+    !hasInquiryObjective
+  )
     rules.push({
       key: `missing-usage:${job.id}`,
       kind: "missing_information",
@@ -39,7 +56,12 @@ function rulesFor(job: typeof jobs.$inferSelect, hasConflict: boolean): Rule[] {
       approval: true,
       prepared: `Hi — Thanks for sharing the details for ${job.title}. Could you confirm the intended usage, media, territory, and term? Once I have that, I can review the scope and fee properly.`,
     });
-  if (job.lifecycleStatus === "inquiry" && !job.shootStart)
+  if (
+    job.lifecycleStatus === "inquiry" &&
+    !job.shootStart &&
+    !hasKnownDateOptions &&
+    !hasInquiryObjective
+  )
     rules.push({
       key: `missing-date:${job.id}`,
       kind: "missing_information",
@@ -77,6 +99,16 @@ export async function reevaluateWorkspace(workspaceId: string) {
     .select()
     .from(holds)
     .where(and(eq(holds.workspaceId, workspaceId), eq(holds.status, "active")));
+  const [objectives, dateOptions] = await Promise.all([
+    db
+      .select()
+      .from(coordinationObjectives)
+      .where(eq(coordinationObjectives.workspaceId, workspaceId)),
+    db
+      .select()
+      .from(coordinationDateOptions)
+      .where(eq(coordinationDateOptions.workspaceId, workspaceId)),
+  ]);
   const desired = new Map<string, Rule & { jobId: string }>();
   for (const job of allJobs) {
     const mine = activeHolds.filter((h) => h.jobId === job.id);
@@ -86,7 +118,21 @@ export async function reevaluateWorkspace(workspaceId: string) {
           b.jobId !== job.id && a.startsAt < b.endsAt && a.endsAt > b.startsAt,
       ),
     );
-    for (const rule of rulesFor(job, conflict))
+    const hasInquiryObjective = objectives.some(
+      (objective) =>
+        objective.jobId === job.id &&
+        objective.kind === "advance_inquiry" &&
+        !["completed", "declined"].includes(objective.state),
+    );
+    const hasKnownDateOptions = dateOptions.some(
+      (option) => option.jobId === job.id,
+    );
+    for (const rule of rulesFor(
+      job,
+      conflict,
+      hasInquiryObjective,
+      hasKnownDateOptions,
+    ))
       desired.set(rule.key, { ...rule, jobId: job.id });
   }
   const existing = await db

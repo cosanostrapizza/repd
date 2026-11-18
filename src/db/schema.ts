@@ -109,6 +109,11 @@ export const jobs = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    titleSource: text("title_source", {
+      enum: ["generated", "source_confirmed", "manual"],
+    })
+      .notNull()
+      .default("manual"),
     clientOrganizationId: text("client_organization_id").references(
       () => organizations.id,
       { onDelete: "set null" },
@@ -138,6 +143,8 @@ export const jobs = pgTable(
     shootEnd: timestamp("shoot_end", { withTimezone: true }),
     location: text("location"),
     feeCents: integer("fee_cents"),
+    proposedBudgetMinCents: integer("proposed_budget_min_cents"),
+    proposedBudgetMaxCents: integer("proposed_budget_max_cents"),
     feeState: text("fee_state", { enum: ["proposed", "confirmed"] })
       .notNull()
       .default("proposed"),
@@ -306,6 +313,141 @@ export const sources = pgTable("sources", {
     .defaultNow(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 });
+
+export const coordinationObjectives = pgTable(
+  "coordination_objectives",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").references(() => sources.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind", { enum: ["advance_inquiry"] }).notNull(),
+    title: text("title").notNull(),
+    outcome: text("outcome").notNull(),
+    summary: text("summary").notNull(),
+    state: text("state", {
+      enum: [
+        "awaiting_decisions",
+        "preparing_response",
+        "awaiting_approval",
+        "awaiting_external",
+        "ready_to_advance",
+        "needs_attention",
+        "declined",
+        "completed",
+      ],
+    })
+      .notNull()
+      .default("awaiting_decisions"),
+    nextAction: text("next_action").notNull(),
+    completedSteps: jsonb("completed_steps")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    evidence: jsonb("evidence")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    ...audit,
+  },
+  (t) => [
+    uniqueIndex("coordination_objectives_job_kind").on(
+      t.workspaceId,
+      t.jobId,
+      t.kind,
+    ),
+  ],
+);
+
+export const coordinationDependencies = pgTable(
+  "coordination_dependencies",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    objectiveId: text("objective_id")
+      .notNull()
+      .references(() => coordinationObjectives.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    owner: text("owner", { enum: ["repd", "creative", "external"] }).notNull(),
+    status: text("status", {
+      enum: [
+        "verified",
+        "no_record_found",
+        "not_checked",
+        "unable_to_check",
+        "needs_decision",
+        "needs_external",
+        "resolved",
+        "not_applicable",
+      ],
+    }).notNull(),
+    result: text("result").notNull(),
+    value: jsonb("value").$type<unknown>(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>(),
+    resolutionSource: text("resolution_source", {
+      enum: ["records", "user", "external", "system"],
+    }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    ...audit,
+  },
+  (t) => [
+    uniqueIndex("coordination_dependencies_objective_key").on(
+      t.objectiveId,
+      t.key,
+    ),
+  ],
+);
+
+export const coordinationDateOptions = pgTable(
+  "coordination_date_options",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    objectiveId: text("objective_id")
+      .notNull()
+      .references(() => coordinationObjectives.id, { onDelete: "cascade" }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").references(() => sources.id, {
+      onDelete: "set null",
+    }),
+    label: text("label").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    relationship: text("relationship", {
+      enum: ["single", "alternative", "range"],
+    }).notNull(),
+    tentative: boolean("tentative").notNull().default(true),
+    holdRequested: boolean("hold_requested").notNull().default(false),
+    holdPriority: text("hold_priority", {
+      enum: ["first", "second", "unspecified"],
+    }),
+    holdState: text("hold_state", {
+      enum: ["not_requested", "requested", "granted", "declined"],
+    })
+      .notNull()
+      .default("not_requested"),
+    decision: text("decision", {
+      enum: ["offer", "defer", "decline"],
+    }),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>(),
+    ...audit,
+  },
+  (t) => [
+    uniqueIndex("coordination_date_options_objective_label").on(
+      t.objectiveId,
+      t.label,
+    ),
+  ],
+);
 export const jobFields = pgTable(
   "job_fields",
   {
@@ -490,3 +632,8 @@ export type Organization = typeof organizations.$inferSelect;
 export type Source = typeof sources.$inferSelect;
 export type IntakeReview = typeof intakeReviews.$inferSelect;
 export type Communication = typeof communications.$inferSelect;
+export type CoordinationObjective = typeof coordinationObjectives.$inferSelect;
+export type CoordinationDependency =
+  typeof coordinationDependencies.$inferSelect;
+export type CoordinationDateOption =
+  typeof coordinationDateOptions.$inferSelect;

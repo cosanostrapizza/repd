@@ -9,6 +9,7 @@ const actionLabels: Record<string, string> = {
   hold_conflict: "Decide holds",
   invoice: "Prepare invoice",
   job_review: "Review changes",
+  advance_inquiry: "Open coordination workspace",
 };
 
 export function ActionList({

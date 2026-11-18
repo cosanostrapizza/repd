@@ -8,6 +8,7 @@ import {
   actionEvents,
   actions,
   communications,
+  coordinationObjectives,
   intakeReviews,
   invoiceDrafts,
   jobs,
@@ -18,6 +19,7 @@ import { getAIConfiguration } from "./ai/provider";
 import {
   acceptIntakeReview,
   createAndAnalyzeIntake,
+  recordAdvanceInquiryDecisions,
   rewriteCommunication,
 } from "./services/intake";
 import { requireContext } from "./auth";
@@ -94,8 +96,6 @@ export async function acceptReviewAction(
       targetJobId: value(formData, "targetJobId") || null,
       corrections,
       rejectedKeys,
-      preparedSubject: value(formData, "preparedSubject"),
-      preparedBody: value(formData, "preparedBody"),
     });
     revalidatePath("/");
     revalidatePath("/jobs");
@@ -108,6 +108,52 @@ export async function acceptReviewAction(
     };
   }
   redirect(`/jobs/${acceptedJobId}`);
+}
+
+export async function saveInquiryDecisions(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
+  const ctx = await requireContext();
+  const objectiveId = value(formData, "objectiveId");
+  const interest = value(formData, "interest");
+  if (!["yes", "maybe", "no"].includes(interest))
+    return { error: "Choose how interested you are before continuing." };
+  const categoryConflict = value(formData, "categoryConflict");
+  const dateDecisions: Record<string, "offer" | "defer" | "decline"> = {};
+  for (const [key, raw] of formData.entries()) {
+    if (!key.startsWith("dateDecision_")) continue;
+    const decision = String(raw);
+    if (["offer", "defer", "decline"].includes(decision))
+      dateDecisions[key.slice("dateDecision_".length)] = decision as
+        "offer" | "defer" | "decline";
+  }
+  let actionId: string;
+  try {
+    actionId = await recordAdvanceInquiryDecisions({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      objectiveId,
+      interest: interest as "yes" | "maybe" | "no",
+      categoryConflict: ["none_known", "possible", "unsure"].includes(
+        categoryConflict,
+      )
+        ? (categoryConflict as "none_known" | "possible" | "unsure")
+        : undefined,
+      dateDecisions,
+    });
+    revalidatePath("/");
+    revalidatePath("/jobs");
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "The decisions were saved, but the response could not be prepared.",
+      configuration: getAIConfiguration(),
+    };
+  }
+  redirect(`/actions/${actionId}`);
 }
 
 export async function rejectReview(formData: FormData) {
@@ -312,7 +358,11 @@ export async function confirmCommunicationSent(formData: FormData) {
     .update(communications)
     .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
     .where(eq(communications.id, communicationId));
-  const payload = row.action.payload as { questionIds?: string[] };
+  const payload = row.action.payload as {
+    questionIds?: string[];
+    objectiveId?: string;
+    interest?: string;
+  };
   for (const questionId of payload.questionIds ?? [])
     await db
       .update(questions)
@@ -346,6 +396,30 @@ export async function confirmCommunicationSent(formData: FormData) {
     toStatus: payload.questionIds?.length ? row.action.status : "resolved",
     metadata: { communicationId, confirmedByUser: true },
   });
+  if (payload.objectiveId)
+    await db
+      .update(coordinationObjectives)
+      .set({
+        state:
+          payload.interest === "no"
+            ? "declined"
+            : payload.questionIds?.length
+              ? "awaiting_external"
+              : "ready_to_advance",
+        nextAction:
+          payload.interest === "no"
+            ? "The decline was handed off and user-confirmed as sent."
+            : payload.questionIds?.length
+              ? "Wait for the producer’s response, then reconcile it here."
+              : "The response was sent; review the opportunity’s next booking step.",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(coordinationObjectives.id, payload.objectiveId),
+          eq(coordinationObjectives.workspaceId, ctx.workspaceId),
+        ),
+      );
   revalidatePath(`/actions/${row.action.id}`);
   revalidatePath(`/jobs/${row.communication.jobId}`);
 }

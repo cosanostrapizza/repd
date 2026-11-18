@@ -1,9 +1,22 @@
 # Repd Implementation Checkpoint
 
 Last updated: 2026-11-17
-Checkpoint: Milestone 2 complete
+Checkpoint: Coordination-intelligence iteration complete
 
 The product brief remains at `docs/repd-mvp-product-brief.md` for product vision and domain context. The Milestone 2 redesign supersedes conflicting interaction specifications: intake is briefing-first, job pages are living business briefs, and actions use purpose-built workspaces. This file preserves the original Milestone 1 history below and records the Milestone 2 evolution without retroactively redefining that checkpoint.
+
+## Coordination-intelligence iteration
+
+- Added a small persistent objective model for `advance_inquiry`: one objective per job, owned dependencies, evidence/result states, normalized date options, progress, completed steps, and a next action. This is deliberately not a generic workflow engine.
+- Added forward migration `0002_coordination_intelligence.sql`, workspace predicates, RLS policies, and unique keys that prevent duplicate objectives, dependencies, date options, and inquiry actions.
+- Preserved proposed budget minimum/maximum separately from `fee_cents`; added generated/source-confirmed/manual title provenance.
+- Persisted accepted agency identity as an organization, job participant, and producer affiliation.
+- Replaced empty-final-field action generation for objective-owned inquiries. Alternative dates no longer create “Confirm shoot date,” and one objective action groups the dependencies.
+- Added deterministic checks for each date, active holds, and client history. Results distinguish verified checks, no record found, and unavailable external calendar/contract evidence.
+- Added a contextual job workspace for interest, per-date requested-hold choices, and category-conflict judgment. Active holds are created only for dates explicitly authorized by the creative.
+- Delayed communication generation until decisions exist. The draft receives the job facts, proposed budget, exact date decisions, internal checks, conflict qualification, and only remaining external questions.
+- Extended reconciliation so accepted producer replies resolve matching dependencies/questions, preserve earlier decisions, record a before/after review, and advance the same objective/action.
+- Added identical-source retry prevention and durable AI failure behavior; sources and saved decisions survive provider failures.
 
 ## Milestone 2 product evolution
 
@@ -93,12 +106,12 @@ Milestone 1 established the functional local foundation described in the shipped
 
 ## Verification record
 
-Verified for the Milestone 2 checkpoint:
+Verified for the coordination-intelligence iteration:
 
 - `pnpm typecheck` — passed.
 - `pnpm lint` — passed without warnings.
-- `pnpm test` — 16 tests passed across six files, including structured-output validation, requirement policy, schema invariants, database migrations, approval/execution separation, workspace scoping, and database URL normalization.
-- `pnpm test:e2e` — 12 journeys passed across desktop and mobile Chromium, including authentication, cross-workspace denial, the Adidas alternative-date/hold-request briefing, one-click creation, missing producer email, producer email approval semantics, coherent response reconciliation, living-brief editing, and scheduling conflicts.
+- `pnpm test` — 18 tests passed across six files, including alternative-date requirements, requested-versus-granted holds, dependency ownership, proposed budget ranges, schema invariants, forward migrations, approval/execution separation, workspace scoping, and database URL normalization.
+- `pnpm test:e2e` — 16 journeys passed across desktop and mobile Chromium, including the complete New Balance coordination flow, explicit hold authorization, decision-conditioned drafting, provider failure/source preservation, declines, authentication, cross-workspace denial, response reconciliation, living-brief editing, and scheduling conflicts.
 - `pnpm build` — optimized production build passed.
 - `pnpm db:migrate` — forward migrations were current and idempotent against the preserved local database.
 - The exact `DATABASE_URL=file:./.repd/repd.db` form was verified after URL normalization was added.
@@ -111,14 +124,14 @@ Live OpenAI execution is implemented and can be configured locally, but it was n
 - RLS policies exist, but the embedded owner connection bypasses normal RLS enforcement. Hosted use requires a non-owner role and transaction-level `app.workspace_id`; application-level workspace predicates are the active local boundary.
 - The credential auth implementation has no password reset, email verification, invitation flow, rate limiting, session revocation UI, or production account recovery. The development session secret fallback must not be used in production.
 - Existing-job match candidates use local title/client word overlap. There is no embedding index or model-based duplicate classifier.
-- Requested schedule alternatives and hold requests are stored as accepted provenance revisions rather than dedicated normalized request entities. Only actual user-created holds enter the `holds` table.
-- The extraction schema includes agency data, but acceptance currently persists the client organization and producer relationship; agency relationship persistence is incomplete.
+- Requested schedule alternatives and hold intent are normalized for new-inquiry objectives and also retain accepted source provenance. Only creative-authorized holds enter the `holds` table.
+- Agency identity is persisted for accepted new inquiries; richer agency history reconciliation and role changes are not modeled.
 - Source immutability is an application convention and metadata flag, not a database trigger or write-once permission.
 - Per-field rejection prevents an overwrite but does not create a separate rejected `job_field_revision`; accepted non-null values receive revisions.
 - Contextual requirement policy covers only five fields and a small set of job-type/stage rules.
 - Action supersession columns exist, but an end-to-end supersede workflow is not implemented. Most obsolete work is represented as resolved with `condition_satisfied`.
 - Action reevaluation scans all jobs and actions in a workspace; there is no dependency index, queue, or background worker.
-- AI coordination preparation failures are recorded in `ai_runs`, but the accepted intake can complete without producing a coordination action.
+- AI communication failures are recorded in `ai_runs`; the objective enters `needs_attention` while saved decisions remain available for retry.
 - Home briefing prose is deterministic. There is no live LLM-generated daily summary.
 - Email uses copy and `mailto:`. “Sent” is an explicit user assertion, not provider-confirmed delivery.
 - Calendar records do not store temporal precision. Midnight is inferred as all-day for presentation.
