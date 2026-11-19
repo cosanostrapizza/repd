@@ -4,6 +4,11 @@ import {
   inquiryExtractionSchema,
 } from "@/lib/ai/schemas";
 import { evaluateRequirements } from "@/lib/services/requirements";
+import {
+  communicationPreservesTreatmentDecision,
+  resolveTreatmentPreparationInput,
+  treatmentCommitmentSentence,
+} from "@/lib/communication-constraints";
 
 const field = (value: unknown) => ({
   value,
@@ -16,6 +21,78 @@ const field = (value: unknown) => ({
 });
 
 describe("structured AI boundaries", () => {
+  it("rejects a draft that weakens a conditional treatment commitment", () => {
+    expect(
+      communicationPreservesTreatmentDecision(
+        "I can commit to November 23, subject to reviewing the deck.",
+        "commit_after_deck",
+      ),
+    ).toBe(true);
+    expect(
+      communicationPreservesTreatmentDecision(
+        "I will decide whether I can commit after reviewing the deck.",
+        "commit_after_deck",
+      ),
+    ).toBe(false);
+    expect(
+      communicationPreservesTreatmentDecision(
+        "I can commit to November 23, provided that the deck arrives and can be reviewed.",
+        "commit_after_deck",
+        "the promised deck arrives tomorrow and can be reviewed",
+      ),
+    ).toBe(false);
+  });
+  it("retries preparation from the saved conditional decision", () => {
+    expect(
+      resolveTreatmentPreparationInput({
+        dependencyStatus: "resolved",
+        saved: {
+          decision: "commit_after_deck",
+          condition: "the promised deck arrives tomorrow and can be reviewed",
+        },
+        requestedDecision: "cannot_commit",
+        requestedCondition: null,
+      }),
+    ).toEqual({
+      decision: "commit_after_deck",
+      condition: "the promised deck arrives tomorrow and can be reviewed",
+    });
+  });
+
+  it("fills a missing legacy condition from a matching trusted retry", () => {
+    expect(
+      resolveTreatmentPreparationInput({
+        dependencyStatus: "resolved",
+        saved: {
+          decision: "commit_after_deck",
+          condition: null,
+        },
+        requestedDecision: "commit_after_deck",
+        requestedCondition:
+          "the promised deck arrives tomorrow and can be reviewed",
+      }),
+    ).toEqual({
+      decision: "commit_after_deck",
+      condition: "the promised deck arrives tomorrow and can be reviewed",
+    });
+  });
+  it("builds an immutable conditional commitment sentence", () => {
+    const sentence = treatmentCommitmentSentence({
+      decision: "commit_after_deck",
+      dueDate: "November 23",
+      condition: "the promised deck arrives tomorrow and can be reviewed",
+    });
+    expect(sentence).toBe(
+      "I can meet the November 23 treatment deadline provided that the promised deck arrives tomorrow and can be reviewed.",
+    );
+    expect(
+      communicationPreservesTreatmentDecision(
+        sentence,
+        "commit_after_deck",
+        "the promised deck arrives tomorrow and can be reviewed",
+      ),
+    ).toBe(true);
+  });
   it("accepts a complete source-backed extraction", () => {
     const parsed = inquiryExtractionSchema.parse({
       isJobInquiry: true,
@@ -29,8 +106,8 @@ describe("structured AI boundaries", () => {
       requestedDates: [
         {
           label: "December 16",
-          start: "2026-12-16T14:00:00.000Z",
-          end: "2026-12-17T00:00:00.000Z",
+          start: "2026-12-16",
+          end: "2026-12-16",
           relationship: "alternative",
           confidence: 0.9,
           evidence: {
@@ -40,8 +117,8 @@ describe("structured AI boundaries", () => {
         },
         {
           label: "December 17",
-          start: "2026-12-17T14:00:00.000Z",
-          end: "2026-12-18T00:00:00.000Z",
+          start: "2026-12-17",
+          end: "2026-12-17",
           relationship: "alternative",
           confidence: 0.9,
           evidence: {
@@ -75,7 +152,7 @@ describe("structured AI boundaries", () => {
       agencyName: field(null),
       producerName: field("Maya"),
       producerEmail: field("maya@example.com"),
-      shootStart: field("2027-03-18T12:00:00.000Z"),
+      shootStart: field("2027-03-18"),
       shootEnd: field(null),
       dateOnly: true,
       location: field("Brooklyn"),
@@ -87,6 +164,7 @@ describe("structured AI boundaries", () => {
       bookingStatus: field("unbooked"),
       lifecycleStatus: field("inquiry"),
       relevantNotes: [],
+      operationalObligations: [],
       suggestedMatchTitle: null,
       suggestedMatchReason: null,
     });
@@ -106,6 +184,59 @@ describe("structured AI boundaries", () => {
       includesUsage: null,
       state: "proposed",
     });
+  });
+  it("rejects timestamps masquerading as calendar dates", () => {
+    const complete = {
+      isJobInquiry: true,
+      summary: "Date boundary",
+      assessment: "Calendar date",
+      producerRequests: [],
+      missingInformation: [],
+      risks: [],
+      recommendations: [],
+      suggestedNextWorkflowState: "review_update",
+      requestedDates: [],
+      holdRequest: {
+        requested: false,
+        kind: null,
+        dates: [],
+        evidence: null,
+      },
+      budgetRange: {
+        minCents: null,
+        maxCents: null,
+        currency: "USD",
+        includesUsage: null,
+        state: "missing",
+        confidence: 0,
+        evidence: null,
+      },
+      jobTitle: field("Campaign"),
+      jobTitleSource: "generated",
+      jobType: field("commercial"),
+      clientName: field("Client"),
+      agencyName: field(null),
+      producerName: field(null),
+      producerEmail: field(null),
+      shootStart: field("2026-12-16T00:00:00.000Z"),
+      shootEnd: field(null),
+      dateOnly: true,
+      location: field(null),
+      feeCents: field(null),
+      currency: field("USD"),
+      usageTerms: field(null),
+      deliverables: field(null),
+      paymentTerms: field(null),
+      bookingStatus: field(null),
+      lifecycleStatus: field(null),
+      relevantNotes: [],
+      operationalObligations: [],
+      suggestedMatchTitle: null,
+      suggestedMatchReason: null,
+    };
+    expect(() => inquiryExtractionSchema.parse(complete)).toThrow(
+      /without a time/,
+    );
   });
   it("rejects malformed or unsupported model output", () => {
     expect(() =>
@@ -128,6 +259,7 @@ describe("contextual information requirements", () => {
       jobType: "commercial",
       lifecycleStatus: "inquiry",
       shootStart: new Date(),
+      shootDate: null,
       usageTerms: null,
       location: "Brooklyn",
       feeCents: 500000,
@@ -145,6 +277,7 @@ describe("contextual information requirements", () => {
       jobType: "editorial",
       lifecycleStatus: "inquiry",
       shootStart: new Date(),
+      shootDate: null,
       usageTerms: null,
       location: "Studio",
       feeCents: 200000,
@@ -159,6 +292,7 @@ describe("contextual information requirements", () => {
       jobType: "commercial",
       lifecycleStatus: "inquiry",
       shootStart: null,
+      shootDate: null,
       requestedDateCount: 2,
       usageTerms: null,
     });

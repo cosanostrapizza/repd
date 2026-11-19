@@ -4,17 +4,17 @@ import { usePathname } from "next/navigation";
 import {
   BriefcaseBusiness,
   CalendarDays,
-  CircleUserRound,
-  Home,
+  Bot,
+  SunMedium,
   UsersRound,
 } from "lucide-react";
 
 const links = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "/", label: "Today", icon: SunMedium },
   { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/people", label: "People", icon: UsersRound },
-  { href: "/actions", label: "Actions", icon: CircleUserRound },
+  { href: "/people", label: "Relationships", icon: UsersRound },
+  { href: "/agent", label: "Ask Repd", icon: Bot },
 ];
 export function AppNav() {
   const path = usePathname();

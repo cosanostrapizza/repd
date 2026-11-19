@@ -48,12 +48,12 @@ export function nextNeed(
     | "shootStart"
     | "usageTerms"
     | "invoiceStatus"
-  >,
+  > & { shootDate?: string | null },
 ) {
   if (job.lifecycleStatus === "cancelled") return "No next step";
   if (job.lifecycleStatus === "completed" && job.invoiceStatus === "not_ready")
     return "Prepare invoice";
-  if (!job.shootStart) return "Set shoot date";
+  if (!job.shootStart && !job.shootDate) return "Set shoot date";
   if (!job.usageTerms && job.lifecycleStatus === "inquiry")
     return "Confirm usage";
   if (job.bookingStatus === "unbooked") return "Review booking";

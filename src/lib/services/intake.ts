@@ -41,6 +41,18 @@ import {
   missingInformationInstructions,
 } from "@/lib/ai/prompts";
 import { reevaluateWorkspace } from "@/lib/action-engine";
+import { calendarDate, calendarDateRange } from "@/lib/calendar-date";
+import {
+  communicationPreservesTreatmentDecision,
+  resolveTreatmentPreparationInput,
+  treatmentCommitmentSentence,
+} from "@/lib/communication-constraints";
+import { reconcileDateOptionHoldState } from "@/lib/workspace-state-rules";
+import {
+  classifyPreparationFailure,
+  PreparationArtifactValidationError,
+  runWithBoundedAutomaticRetry,
+} from "@/lib/preparation-retry";
 import { evaluateRequirements } from "./requirements";
 
 const fieldLabels: Record<string, string> = {
@@ -64,6 +76,7 @@ const fieldLabels: Record<string, string> = {
   holdRequest: "Hold request",
   producerRequests: "Producer requests",
   budgetRange: "Indicative budget",
+  operationalObligations: "Operational obligations",
 };
 const scalarFieldKeys = Object.keys(fieldLabels) as Array<
   keyof InquiryExtraction
@@ -468,12 +481,22 @@ export async function acceptIntakeReview(args: {
       corrected.bookingStatus.value ??
       currentJob?.bookingStatus ??
       ("unbooked" as const),
-    shootStart: corrected.shootStart.value
-      ? new Date(corrected.shootStart.value)
-      : (currentJob?.shootStart ?? null),
-    shootEnd: corrected.shootEnd.value
-      ? new Date(corrected.shootEnd.value)
-      : (currentJob?.shootEnd ?? null),
+    shootDate:
+      corrected.dateOnly && corrected.shootStart.value
+        ? calendarDate(corrected.shootStart.value)
+        : (currentJob?.shootDate ?? null),
+    shootStart:
+      corrected.shootStart.value && !corrected.dateOnly
+        ? new Date(corrected.shootStart.value)
+        : corrected.dateOnly && corrected.shootStart.value
+          ? null
+          : (currentJob?.shootStart ?? null),
+    shootEnd:
+      corrected.shootEnd.value && !corrected.dateOnly
+        ? new Date(corrected.shootEnd.value)
+        : corrected.dateOnly && corrected.shootStart.value
+          ? null
+          : (currentJob?.shootEnd ?? null),
     location: corrected.location.value ?? currentJob?.location ?? null,
     feeCents: corrected.feeCents.value ?? currentJob?.feeCents ?? null,
     proposedBudgetMinCents:
@@ -562,6 +585,16 @@ export async function acceptIntakeReview(args: {
       state: "unconfirmed",
       confidence: 0.9,
     });
+  if (corrected.operationalObligations.length)
+    await upsertFieldRevision({
+      workspaceId: args.workspaceId,
+      jobId,
+      sourceId: review.sourceId,
+      key: "operationalObligations",
+      value: corrected.operationalObligations,
+      state: "unconfirmed",
+      confidence: 0.95,
+    });
   if (corrected.budgetRange.minCents != null)
     await upsertFieldRevision({
       workspaceId: args.workspaceId,
@@ -575,7 +608,7 @@ export async function acceptIntakeReview(args: {
   let producerId: string | null = null;
   if (corrected.producerName.value || corrected.producerEmail.value) {
     const email = corrected.producerEmail.value?.toLowerCase() ?? null;
-    const [person] = email
+    const [personByEmail] = email
       ? await db
           .select()
           .from(people)
@@ -587,6 +620,31 @@ export async function acceptIntakeReview(args: {
           )
           .limit(1)
       : [];
+    const sameJobProducers = !personByEmail
+      ? await db
+          .select({ person: people, participant: jobParticipants })
+          .from(jobParticipants)
+          .innerJoin(people, eq(jobParticipants.personId, people.id))
+          .where(
+            and(
+              eq(jobParticipants.workspaceId, args.workspaceId),
+              eq(jobParticipants.jobId, jobId),
+              eq(jobParticipants.role, "Producer"),
+            ),
+          )
+      : [];
+    const normalizedName = corrected.producerName.value
+      ?.trim()
+      .toLocaleLowerCase();
+    const nameMatches = normalizedName
+      ? sameJobProducers.filter(
+          ({ person: candidate }) =>
+            candidate.name.trim().toLocaleLowerCase() === normalizedName,
+        )
+      : [];
+    const person =
+      personByEmail ??
+      (nameMatches.length === 1 ? nameMatches[0].person : undefined);
     if (!person) {
       producerId = id("person");
       await db.insert(people).values({
@@ -595,7 +653,14 @@ export async function acceptIntakeReview(args: {
         name: corrected.producerName.value ?? email ?? "Producer",
         email,
       });
-    } else producerId = person.id;
+    } else {
+      producerId = person.id;
+      if (email && !person.email)
+        await db
+          .update(people)
+          .set({ email, updatedAt: new Date() })
+          .where(eq(people.id, person.id));
+    }
     const [participant] = await db
       .select()
       .from(jobParticipants)
@@ -762,13 +827,18 @@ function inferDateOption(
   capturedAt: Date,
 ) {
   if (option.start) {
-    const startsAt = new Date(option.start);
-    const endsAt = option.end
-      ? new Date(option.end)
-      : new Date(startsAt.getTime() + 10 * 60 * 60 * 1000);
-    return { startsAt, endsAt };
+    const startsOn = calendarDate(option.start);
+    const endsOn = calendarDate(option.end) ?? startsOn;
+    const range = startsOn ? calendarDateRange(startsOn) : null;
+    return {
+      startsOn,
+      endsOn,
+      startsAt: range?.startsAt ?? null,
+      endsAt: range?.endsAt ?? null,
+    };
   }
-  if (option.relationship === "range") return { startsAt: null, endsAt: null };
+  if (option.relationship === "range")
+    return { startsOn: null, endsOn: null, startsAt: null, endsAt: null };
   const months: Record<string, number> = {
     january: 0,
     february: 1,
@@ -797,9 +867,37 @@ function inferDateOption(
     year += 1;
   const startsAt = new Date(Date.UTC(year, month, day, 14));
   return {
+    startsOn: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    endsOn: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
     startsAt,
     endsAt: new Date(startsAt.getTime() + 10 * 60 * 60 * 1000),
   };
+}
+
+function dateMentionKey(value: string) {
+  const iso = calendarDate(value);
+  if (iso) return iso.slice(5);
+  const match = value
+    .toLocaleLowerCase()
+    .match(
+      /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})/,
+    );
+  if (!match) return null;
+  const month = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+  ].indexOf(match[1]);
+  return `${String(month + 1).padStart(2, "0")}-${String(Number(match[2])).padStart(2, "0")}`;
 }
 
 async function insertDependency(args: {
@@ -832,7 +930,23 @@ async function insertDependency(args: {
       ),
     )
     .limit(1);
-  if (existing) return existing;
+  if (existing) {
+    await db
+      .update(coordinationDependencies)
+      .set({
+        label: args.label,
+        owner: args.owner,
+        status: args.status,
+        result: args.result,
+        value: args.value,
+        evidence: args.evidence,
+        resolutionSource: args.resolutionSource,
+        resolvedAt: args.status === "resolved" ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(coordinationDependencies.id, existing.id));
+    return { ...existing, ...args };
+  }
   const dependency = {
     id: id("dep"),
     workspaceId: args.workspaceId,
@@ -924,15 +1038,21 @@ export async function createAdvanceInquiryObjective(args: {
       ),
     );
   for (const option of args.extraction.requestedDates) {
-    const { startsAt, endsAt } = inferDateOption(option, source.capturedAt);
+    const { startsOn, endsOn, startsAt, endsAt } = inferDateOption(
+      option,
+      source.capturedAt,
+    );
     const optionId = id("date");
     const requested =
       args.extraction.holdRequest.requested &&
       (args.extraction.holdRequest.dates.length === 0 ||
+        args.extraction.holdRequest.dates.some((label) =>
+          /\b(all|both|each)\b/i.test(label),
+        ) ||
         args.extraction.holdRequest.dates.some(
           (label) =>
-            label.toLowerCase().includes(option.label.toLowerCase()) ||
-            option.label.toLowerCase().includes(label.toLowerCase()),
+            dateMentionKey(label) ===
+            dateMentionKey(option.start ?? option.label),
         ));
     await db.insert(coordinationDateOptions).values({
       id: optionId,
@@ -943,6 +1063,8 @@ export async function createAdvanceInquiryObjective(args: {
       label: option.label,
       startsAt,
       endsAt,
+      startsOn,
+      endsOn,
       relationship: option.relationship,
       tentative: true,
       holdRequested: requested,
@@ -1065,6 +1187,7 @@ export async function createAdvanceInquiryObjective(args: {
     id: actionId,
     workspaceId: args.workspaceId,
     jobId: args.jobId,
+    objectiveId,
     personId: args.producerId,
     kind: "advance_inquiry",
     title: `Decide how to advance ${job.title}`,
@@ -1102,62 +1225,64 @@ export async function recordAdvanceInquiryDecisions(args: {
     )
     .limit(1);
   if (!objective) throw new Error("Coordination objective not found.");
-  const [job, dateOptions, dependencies, action, producer] = await Promise.all([
-    db
-      .select()
-      .from(jobs)
-      .where(
-        and(
-          eq(jobs.id, objective.jobId),
-          eq(jobs.workspaceId, args.workspaceId),
+  const [job, dateOptions, dependencies, decisionAction, producer] =
+    await Promise.all([
+      db
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.id, objective.jobId),
+            eq(jobs.workspaceId, args.workspaceId),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
+      db
+        .select()
+        .from(coordinationDateOptions)
+        .where(
+          and(
+            eq(coordinationDateOptions.objectiveId, objective.id),
+            eq(coordinationDateOptions.workspaceId, args.workspaceId),
+          ),
         ),
-      )
-      .limit(1)
-      .then((rows) => rows[0]),
-    db
-      .select()
-      .from(coordinationDateOptions)
-      .where(
-        and(
-          eq(coordinationDateOptions.objectiveId, objective.id),
-          eq(coordinationDateOptions.workspaceId, args.workspaceId),
+      db
+        .select()
+        .from(coordinationDependencies)
+        .where(
+          and(
+            eq(coordinationDependencies.objectiveId, objective.id),
+            eq(coordinationDependencies.workspaceId, args.workspaceId),
+          ),
         ),
-      ),
-    db
-      .select()
-      .from(coordinationDependencies)
-      .where(
-        and(
-          eq(coordinationDependencies.objectiveId, objective.id),
-          eq(coordinationDependencies.workspaceId, args.workspaceId),
-        ),
-      ),
-    db
-      .select()
-      .from(actions)
-      .where(
-        and(
-          eq(actions.workspaceId, args.workspaceId),
-          eq(actions.deduplicationKey, `advance-inquiry:${objective.jobId}`),
-        ),
-      )
-      .limit(1)
-      .then((rows) => rows[0]),
-    db
-      .select({ person: people })
-      .from(jobParticipants)
-      .innerJoin(people, eq(jobParticipants.personId, people.id))
-      .where(
-        and(
-          eq(jobParticipants.workspaceId, args.workspaceId),
-          eq(jobParticipants.jobId, objective.jobId),
-          eq(jobParticipants.role, "Producer"),
-        ),
-      )
-      .limit(1)
-      .then((rows) => rows[0]?.person),
-  ]);
-  if (!job || !action) throw new Error("Objective records are incomplete.");
+      db
+        .select()
+        .from(actions)
+        .where(
+          and(
+            eq(actions.workspaceId, args.workspaceId),
+            eq(actions.deduplicationKey, `advance-inquiry:${objective.jobId}`),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
+      db
+        .select({ person: people })
+        .from(jobParticipants)
+        .innerJoin(people, eq(jobParticipants.personId, people.id))
+        .where(
+          and(
+            eq(jobParticipants.workspaceId, args.workspaceId),
+            eq(jobParticipants.jobId, objective.jobId),
+            eq(jobParticipants.role, "Producer"),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]?.person),
+    ]);
+  if (!job || !decisionAction)
+    throw new Error("Objective records are incomplete.");
   const now = new Date();
   await db
     .update(coordinationDependencies)
@@ -1341,6 +1466,74 @@ export async function recordAdvanceInquiryDecisions(args: {
           ),
         );
   }
+  await db
+    .update(actions)
+    .set({
+      status: "resolved",
+      executionStatus: "succeeded",
+      resolutionReason: "completed_by_user",
+      resolvedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(actions.id, decisionAction.id));
+  await db.insert(actionEvents).values({
+    id: id("aev"),
+    workspaceId: args.workspaceId,
+    actionId: decisionAction.id,
+    type: "decisions_recorded",
+    fromStatus: decisionAction.status,
+    toStatus: "resolved",
+    reason: "completed_by_user",
+    metadata: { objectiveId: objective.id },
+  });
+  const preparationKey = `objective-communication:${objective.id}:initial`;
+  let [preparationAction] = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.workspaceId, args.workspaceId),
+        eq(actions.deduplicationKey, preparationKey),
+      ),
+    )
+    .limit(1);
+  if (!preparationAction) {
+    const preparationActionId = id("act");
+    await db.insert(actions).values({
+      id: preparationActionId,
+      workspaceId: args.workspaceId,
+      jobId: job.id,
+      objectiveId: objective.id,
+      personId: producer?.id ?? null,
+      kind: "producer_coordination",
+      title: `Prepare reply to ${producer?.name ?? "the producer"}`,
+      explanation:
+        "Repd is preparing a response from the recorded opportunity decisions.",
+      recommendation: "Review the reply when preparation completes.",
+      priority: "blocking",
+      status: "executing",
+      executionStatus: "executing",
+      deduplicationKey: preparationKey,
+      payload: { objectiveId: objective.id, questionIds },
+      resolutionCondition: { type: "communication_sent" },
+      requiresApproval: true,
+    });
+    [preparationAction] = await db
+      .select()
+      .from(actions)
+      .where(eq(actions.id, preparationActionId))
+      .limit(1);
+  } else
+    await db
+      .update(actions)
+      .set({
+        status: "executing",
+        executionStatus: "executing",
+        resolutionReason: null,
+        resolvedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(actions.id, preparationAction.id));
   try {
     const provider = args.provider ?? getAIProvider();
     const draft = await runTracked({
@@ -1392,7 +1585,7 @@ export async function recordAdvanceInquiryDecisions(args: {
       .where(
         and(
           eq(communications.workspaceId, args.workspaceId),
-          eq(communications.actionId, action.id),
+          eq(communications.actionId, preparationAction.id),
         ),
       )
       .limit(1);
@@ -1416,7 +1609,7 @@ export async function recordAdvanceInquiryDecisions(args: {
         id: communicationId,
         workspaceId: args.workspaceId,
         jobId: job.id,
-        actionId: action.id,
+        actionId: preparationAction.id,
         recipientPersonId: producer?.id ?? null,
         toEmail: producer?.email ?? null,
         subject: draft.subject,
@@ -1425,7 +1618,6 @@ export async function recordAdvanceInquiryDecisions(args: {
     await db
       .update(actions)
       .set({
-        kind: "producer_coordination",
         title: `Review reply to ${producer?.name ?? "the producer"}`,
         explanation:
           args.interest === "no"
@@ -1446,7 +1638,7 @@ export async function recordAdvanceInquiryDecisions(args: {
         resolutionCondition: { type: "questions_answered", questionIds },
         updatedAt: now,
       })
-      .where(eq(actions.id, action.id));
+      .where(eq(actions.id, preparationAction.id));
     await db
       .update(coordinationObjectives)
       .set({
@@ -1475,8 +1667,30 @@ export async function recordAdvanceInquiryDecisions(args: {
       },
     });
     await reevaluateWorkspace(args.workspaceId);
-    return action.id;
+    return preparationAction.id;
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Communication preparation failed.";
+    await db
+      .update(actions)
+      .set({
+        status: "open",
+        executionStatus: "failed",
+        resolutionReason: message,
+        updatedAt: new Date(),
+      })
+      .where(eq(actions.id, preparationAction.id));
+    await db.insert(actionEvents).values({
+      id: id("aev"),
+      workspaceId: args.workspaceId,
+      actionId: preparationAction.id,
+      type: "preparation_failed",
+      fromStatus: "executing",
+      toStatus: "open",
+      reason: message,
+    });
     await db
       .update(coordinationObjectives)
       .set({
@@ -1508,6 +1722,39 @@ export async function reconcileAdvanceInquiryObjective(args: {
     )
     .limit(1);
   if (!objective) return;
+  const selectedShootDate = args.extraction.dateOnly
+    ? calendarDate(args.extraction.shootStart.value)
+    : null;
+  if (selectedShootDate) {
+    const options = await db
+      .select()
+      .from(coordinationDateOptions)
+      .where(
+        and(
+          eq(coordinationDateOptions.workspaceId, args.workspaceId),
+          eq(coordinationDateOptions.objectiveId, objective.id),
+        ),
+      );
+    for (const option of options)
+      await db
+        .update(coordinationDateOptions)
+        .set({
+          clientSelected: option.startsOn === selectedShootDate,
+          clientSelectionSourceId:
+            option.startsOn === selectedShootDate ? args.sourceId : null,
+          // Once the client selects one of several requested dates, an
+          // unselected hold is historical unless the new source explicitly
+          // re-establishes it. Keep the request as evidence, but do not
+          // project it as a current hold.
+          holdState: reconcileDateOptionHoldState({
+            isSelected: option.startsOn === selectedShootDate,
+            holdRequested: option.holdRequested,
+            holdState: option.holdState,
+          }),
+          updatedAt: new Date(),
+        })
+        .where(eq(coordinationDateOptions.id, option.id));
+  }
   const resolvedKeys = new Set(
     extractionFields(args.extraction)
       .filter((field) => field.value != null)
@@ -1563,20 +1810,63 @@ export async function reconcileAdvanceInquiryObjective(args: {
         ),
       );
   }
-  const unresolvedExternal = deps.filter(
+  for (const obligation of args.extraction.operationalObligations) {
+    const status =
+      obligation.status === "needs_decision"
+        ? "needs_decision"
+        : obligation.status === "promised"
+          ? "needs_external"
+          : "resolved";
+    await insertDependency({
+      workspaceId: args.workspaceId,
+      objectiveId: objective.id,
+      key: obligation.key,
+      label: obligation.label,
+      owner: obligation.owner,
+      status,
+      result: [
+        obligation.label,
+        obligation.dueDate ? `Due ${obligation.dueDate}.` : null,
+        obligation.prerequisite
+          ? `Prerequisite: ${obligation.prerequisite}.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      value: obligation,
+      evidence: obligation.evidence ?? undefined,
+      resolutionSource: status === "resolved" ? "external" : undefined,
+    });
+  }
+  const updatedDependencies = await db
+    .select()
+    .from(coordinationDependencies)
+    .where(
+      and(
+        eq(coordinationDependencies.workspaceId, args.workspaceId),
+        eq(coordinationDependencies.objectiveId, objective.id),
+      ),
+    );
+  const unresolvedExternal = updatedDependencies.filter(
     (item) =>
       item.owner === "external" &&
       item.status === "needs_external" &&
       !resolvedKeys.has(item.key),
   );
+  const treatmentDecision = updatedDependencies.find(
+    (item) =>
+      item.key === "treatment_deadline" && item.status === "needs_decision",
+  );
   await db
     .update(coordinationObjectives)
     .set({
-      state: "ready_to_advance",
+      state: treatmentDecision ? "awaiting_decisions" : "ready_to_advance",
       summary: args.extraction.summary,
-      nextAction: unresolvedExternal.length
-        ? "Review what changed and decide whether the remaining external questions still matter."
-        : "Review the resolved terms and choose the next booking step.",
+      nextAction: treatmentDecision
+        ? "Decide whether Alex can commit to the treatment deadline, subject to reviewing the promised deck."
+        : unresolvedExternal.length
+          ? "Review what changed and decide whether the remaining external questions still matter."
+          : "Review the resolved terms and choose the next booking step.",
       completedSteps: [
         ...objective.completedSteps,
         "Reconciled the producer response against the objective",
@@ -1584,45 +1874,584 @@ export async function reconcileAdvanceInquiryObjective(args: {
       updatedAt: new Date(),
     })
     .where(eq(coordinationObjectives.id, objective.id));
-  const [action] = await db
+  const priorActions = await db
     .select()
     .from(actions)
     .where(
       and(
         eq(actions.workspaceId, args.workspaceId),
-        eq(actions.deduplicationKey, `advance-inquiry:${args.jobId}`),
+        eq(actions.objectiveId, objective.id),
       ),
-    )
-    .limit(1);
-  if (action) {
+    );
+  for (const priorAction of priorActions.filter(
+    (item) => item.status !== "resolved" && !item.supersededById,
+  )) {
     await db.insert(actionEvents).values({
       id: id("aev"),
       workspaceId: args.workspaceId,
-      actionId: action.id,
-      type: "producer_response_reconciled",
-      fromStatus: action.status,
-      toStatus: "open",
+      actionId: priorAction.id,
+      type: "producer_response_accepted",
+      fromStatus: priorAction.status,
+      toStatus: "resolved",
       metadata: { sourceId: args.sourceId, resolvedKeys: [...resolvedKeys] },
     });
     await db
       .update(actions)
       .set({
-        kind: "advance_inquiry",
-        title: "Review the producer’s update",
-        explanation: args.extraction.summary,
-        recommendation: unresolvedExternal.length
-          ? "Review the updated terms and remaining questions as one coordination decision."
-          : "Review the updated terms and advance the booking decision.",
-        status: "open",
-        executionStatus: "not_requested",
-        resolutionReason: null,
-        resolvedAt: null,
-        requiresApproval: false,
-        preparedContent: null,
-        payload: { objectiveId: objective.id, sourceId: args.sourceId },
+        status: "resolved",
+        executionStatus: "succeeded",
+        resolutionReason: "condition_satisfied",
+        resolvedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(actions.id, action.id));
+      .where(eq(actions.id, priorAction.id));
+  }
+  const nextActionId = id("act");
+  await db.insert(actions).values({
+    id: nextActionId,
+    workspaceId: args.workspaceId,
+    jobId: args.jobId,
+    objectiveId: objective.id,
+    kind: treatmentDecision ? "treatment_commitment" : "advance_inquiry",
+    title: treatmentDecision
+      ? "Decide whether to commit to the treatment deadline"
+      : "Advance the updated opportunity",
+    explanation: treatmentDecision?.result ?? args.extraction.summary,
+    recommendation: treatmentDecision
+      ? "Decide what Alex can promise after reviewing the producer’s deck."
+      : unresolvedExternal.length
+        ? "Review the remaining external dependencies."
+        : "Advance the booking decision.",
+    priority: treatmentDecision ? "blocking" : "routine",
+    deduplicationKey: `objective-next:${objective.id}:${args.sourceId}`,
+    payload: { objectiveId: objective.id, sourceId: args.sourceId },
+    resolutionCondition: treatmentDecision
+      ? { type: "dependency_resolved", field: "treatment_deadline" }
+      : { type: "objective_completed" },
+  });
+}
+
+export async function recordTreatmentCommitmentDecision(args: {
+  workspaceId: string;
+  userId: string;
+  objectiveId: string;
+  decision: "commit_after_deck" | "need_deck_first" | "cannot_commit";
+  condition?: string | null;
+  provider?: AIProvider;
+}) {
+  const [objective] = await db
+    .select()
+    .from(coordinationObjectives)
+    .where(
+      and(
+        eq(coordinationObjectives.id, args.objectiveId),
+        eq(coordinationObjectives.workspaceId, args.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!objective) throw new Error("Coordination objective not found.");
+  const [job, dependency, producer] = await Promise.all([
+    db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, objective.jobId),
+          eq(jobs.workspaceId, args.workspaceId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select()
+      .from(coordinationDependencies)
+      .where(
+        and(
+          eq(coordinationDependencies.objectiveId, objective.id),
+          eq(coordinationDependencies.key, "treatment_deadline"),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({ person: people })
+      .from(jobParticipants)
+      .innerJoin(people, eq(jobParticipants.personId, people.id))
+      .where(
+        and(
+          eq(jobParticipants.workspaceId, args.workspaceId),
+          eq(jobParticipants.jobId, objective.jobId),
+          eq(jobParticipants.role, "Producer"),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]?.person),
+  ]);
+  if (!job || !dependency)
+    throw new Error("Treatment decision records are incomplete.");
+  const obligation = dependency.value as {
+    dueDate?: string | null;
+    prerequisite?: string | null;
+    decision?: "commit_after_deck" | "need_deck_first" | "cannot_commit";
+    condition?: string | null;
+  } | null;
+  // A retry is preparation, not a second decision. Once recorded, the
+  // dependency is the authority for the exact decision and its condition.
+  const preparationInput = resolveTreatmentPreparationInput({
+    dependencyStatus: dependency.status,
+    saved: obligation,
+    requestedDecision: args.decision,
+    requestedCondition: args.condition,
+  });
+  const effectiveDecision = preparationInput.decision;
+  const effectiveCondition = preparationInput.condition;
+  const now = new Date();
+  const decisionResult =
+    effectiveDecision === "commit_after_deck"
+      ? `Alex can commit to the treatment deadline, ${effectiveCondition ? `provided that ${effectiveCondition}` : "subject to reviewing the promised deck"}.`
+      : effectiveDecision === "need_deck_first"
+        ? "Alex needs to review the promised deck before committing to the treatment deadline."
+        : "Alex cannot commit to the requested treatment deadline.";
+  const objectiveActions = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.workspaceId, args.workspaceId),
+        eq(actions.objectiveId, objective.id),
+      ),
+    )
+    .orderBy(desc(actions.createdAt));
+  const decisionActions = objectiveActions.filter(
+    (action) =>
+      action.kind === "treatment_commitment" ||
+      /decide whether to commit to the treatment deadline/i.test(action.title),
+  );
+  if (dependency.status !== "resolved") {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(coordinationDependencies)
+        .set({
+          status: "resolved",
+          result: decisionResult,
+          value: {
+            ...obligation,
+            decision: effectiveDecision,
+            ...(effectiveCondition ? { condition: effectiveCondition } : {}),
+          },
+          resolutionSource: "user",
+          resolvedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(coordinationDependencies.id, dependency.id));
+      for (const decisionAction of decisionActions)
+        await tx
+          .update(actions)
+          .set({
+            status: "resolved",
+            executionStatus: "succeeded",
+            resolutionReason: "completed_by_user",
+            resolvedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(actions.id, decisionAction.id));
+      await tx
+        .update(coordinationObjectives)
+        .set({
+          state: "preparing_response",
+          nextAction:
+            "The treatment decision is saved. Repd is preparing the response.",
+          updatedAt: now,
+        })
+        .where(eq(coordinationObjectives.id, objective.id));
+    });
+    for (const decisionAction of decisionActions)
+      await db.insert(actionEvents).values({
+        id: id("aev"),
+        workspaceId: args.workspaceId,
+        actionId: decisionAction.id,
+        type: "decision_recorded",
+        fromStatus: decisionAction.status,
+        toStatus: "resolved",
+        reason: "completed_by_user",
+        metadata: { objectiveId: objective.id, decision: effectiveDecision },
+      });
+    await db.insert(activities).values({
+      id: id("activity"),
+      workspaceId: args.workspaceId,
+      jobId: job.id,
+      actorUserId: args.userId,
+      type: "treatment_commitment_decided",
+      summary: decisionResult,
+      metadata: { objectiveId: objective.id, decision: effectiveDecision },
+    });
+  }
+  const preparationKey = `treatment-communication:${objective.id}:${dependency.id}`;
+  let [preparationAction] = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.workspaceId, args.workspaceId),
+        eq(actions.deduplicationKey, preparationKey),
+      ),
+    )
+    .limit(1);
+  if (!preparationAction) {
+    const preparationActionId = id("act");
+    await db.insert(actions).values({
+      id: preparationActionId,
+      workspaceId: args.workspaceId,
+      jobId: job.id,
+      objectiveId: objective.id,
+      personId: producer?.id ?? null,
+      kind: "producer_coordination",
+      title: `Prepare treatment reply to ${producer?.name ?? "the producer"}`,
+      explanation: decisionResult,
+      recommendation: "Review the deadline response before handoff.",
+      priority: "blocking",
+      status: "executing",
+      executionStatus: "executing",
+      deduplicationKey: preparationKey,
+      requiresApproval: true,
+      payload: {
+        objectiveId: objective.id,
+        questionIds: [],
+        treatmentDecision: effectiveDecision,
+        ...(effectiveCondition
+          ? { treatmentCondition: effectiveCondition }
+          : {}),
+      },
+      resolutionCondition: { type: "communication_sent" },
+    });
+    [preparationAction] = await db
+      .select()
+      .from(actions)
+      .where(eq(actions.id, preparationActionId))
+      .limit(1);
+  } else
+    await db
+      .update(actions)
+      .set({
+        status: "executing",
+        executionStatus: "executing",
+        resolutionReason: null,
+        resolvedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(actions.id, preparationAction.id));
+  const requiredCommitmentSentence = treatmentCommitmentSentence({
+    decision: effectiveDecision,
+    dueDate: obligation?.dueDate ?? null,
+    condition: effectiveCondition,
+  });
+  const draftInput = JSON.stringify({
+    job: { title: job.title, shootDate: job.shootDate },
+    producer: producer ? { name: producer.name, email: producer.email } : null,
+    immutableBusinessFacts: {
+      treatmentDecision: effectiveDecision,
+      treatmentCondition: effectiveCondition,
+      requiredCommitmentSentence,
+      externalDeliveryAuthorized: false,
+    },
+    treatment: {
+      decision: effectiveDecision,
+      dueDate: obligation?.dueDate ?? null,
+      prerequisite: obligation?.prerequisite ?? null,
+      condition: effectiveCondition,
+    },
+  });
+  let automaticAttempts = 0;
+  const generateDraft = async (repair = false) => {
+    const provider = args.provider ?? getAIProvider();
+    const result = await runWithBoundedAutomaticRetry({
+      operation: () => {
+        automaticAttempts += 1;
+        return runTracked({
+          workspaceId: args.workspaceId,
+          jobId: job.id,
+          purpose: "treatment_commitment_communication",
+          input: draftInput,
+          instructions: `${draftCommunicationInstructions}\nThe immutableBusinessFacts object is authoritative and must not be reinterpreted. Copy requiredCommitmentSentence verbatim into the email body. It records an already-authorized present conditional commitment, not a future decision. Do not replace it with language about assessing, deciding, confirming later, seeing whether the deadline is possible, or letting the producer know. A client-selected shoot date is not a confirmed booking. Do not imply delivery or sending.${repair ? " The previous attempt changed the commitment semantics. Keep requiredCommitmentSentence exactly as supplied and regenerate only the surrounding email wording." : ""}`,
+          schema: communicationDraftSchema,
+          schemaName: "repd_treatment_commitment_email_v1",
+          provider,
+        });
+      },
+      onRetry: async (attempt) => {
+        await db.insert(actionEvents).values({
+          id: id("aev"),
+          workspaceId: args.workspaceId,
+          actionId: preparationAction.id,
+          type: "preparation_retrying",
+          fromStatus: "executing",
+          toStatus: "executing",
+          reason: `Transient model-provider failure. Automatic attempt ${attempt} of 2.`,
+          metadata: { attempt, maxAttempts: 2 },
+        });
+      },
+    });
+    return result.value;
+  };
+  try {
+    let draft = await generateDraft();
+    if (
+      !draft.body.includes(requiredCommitmentSentence) ||
+      !communicationPreservesTreatmentDecision(
+        draft.body,
+        effectiveDecision,
+        effectiveCondition,
+      )
+    )
+      draft = await generateDraft(true);
+    if (
+      !draft.body.includes(requiredCommitmentSentence) ||
+      !communicationPreservesTreatmentDecision(
+        draft.body,
+        effectiveDecision,
+        effectiveCondition,
+      )
+    )
+      throw new PreparationArtifactValidationError(
+        "Repd could not prepare a draft without changing the saved treatment commitment.",
+      );
+    const [existingCommunication] = await db
+      .select()
+      .from(communications)
+      .where(
+        and(
+          eq(communications.workspaceId, args.workspaceId),
+          eq(communications.actionId, preparationAction.id),
+        ),
+      )
+      .limit(1);
+    const communicationId = existingCommunication?.id ?? id("communication");
+    await db.transaction(async (tx) => {
+      if (existingCommunication)
+        await tx
+          .update(communications)
+          .set({
+            recipientPersonId: producer?.id ?? null,
+            toEmail: producer?.email ?? null,
+            subject: draft.subject,
+            body: draft.body,
+            status: "draft",
+            approvedAt: null,
+            revision: existingCommunication.revision + 1,
+            updatedAt: now,
+          })
+          .where(eq(communications.id, existingCommunication.id));
+      else
+        await tx.insert(communications).values({
+          id: communicationId,
+          workspaceId: args.workspaceId,
+          jobId: job.id,
+          actionId: preparationAction.id,
+          recipientPersonId: producer?.id ?? null,
+          toEmail: producer?.email ?? null,
+          subject: draft.subject,
+          body: draft.body,
+        });
+      await tx
+        .update(actions)
+        .set({
+          title: `Review treatment reply to ${producer?.name ?? "the producer"}`,
+          status: "pending_approval",
+          executionStatus: "not_requested",
+          preparedContent: draft.body,
+          payload: {
+            objectiveId: objective.id,
+            communicationId,
+            questionIds: [],
+            treatmentDecision: effectiveDecision,
+            ...(effectiveCondition
+              ? { treatmentCondition: effectiveCondition }
+              : {}),
+            automaticAttempts,
+          },
+          updatedAt: now,
+        })
+        .where(eq(actions.id, preparationAction.id));
+      await tx
+        .update(coordinationObjectives)
+        .set({
+          state: "awaiting_approval",
+          nextAction: "Review and approve the prepared treatment response.",
+          completedSteps: [
+            ...objective.completedSteps,
+            "Recorded Alex’s treatment deadline decision",
+            "Prepared the follow-up response",
+          ],
+          updatedAt: now,
+        })
+        .where(eq(coordinationObjectives.id, objective.id));
+    });
+    return preparationAction.id;
+  } catch (error) {
+    const failure = classifyPreparationFailure(error);
+    const message =
+      failure.category === "provider_transient"
+        ? `The model provider did not complete the reply after ${Math.max(automaticAttempts, 2)} attempts. ${failure.message}`
+        : failure.category === "provider_configuration"
+          ? `Reply preparation is not configured. ${failure.message}`
+          : failure.category === "provider_non_retryable"
+            ? `The model provider could not prepare the reply. ${failure.message}`
+            : failure.category === "artifact_validation"
+              ? `The provider returned a draft, but Repd rejected it because it changed the saved commitment. ${failure.message}`
+              : `The saved decision is intact, but Repd could not complete the preparation state change. ${failure.message}`;
+    const failedPayload = {
+      ...(preparationAction.payload as Record<string, unknown>),
+      failureCategory: failure.category,
+      automaticAttempts,
+    };
+    await db.transaction(async (tx) => {
+      await tx
+        .update(actions)
+        .set({
+          status: "open",
+          executionStatus: "failed",
+          resolutionReason: message,
+          payload: failedPayload,
+          updatedAt: new Date(),
+        })
+        .where(eq(actions.id, preparationAction.id));
+      await tx
+        .update(coordinationObjectives)
+        .set({
+          state: "needs_attention",
+          nextAction:
+            "The treatment decision is saved. Reply preparation failed and can be retried.",
+          updatedAt: new Date(),
+        })
+        .where(eq(coordinationObjectives.id, objective.id));
+    });
+    await db.insert(actionEvents).values({
+      id: id("aev"),
+      workspaceId: args.workspaceId,
+      actionId: preparationAction.id,
+      type: "preparation_failed",
+      fromStatus: "executing",
+      toStatus: "open",
+      reason: message,
+      metadata: {
+        failureCategory: failure.category,
+        automaticallyRetryable: failure.automaticallyRetryable,
+        automaticAttempts,
+      },
+    });
+    throw error;
+  }
+}
+
+export async function retryTreatmentPreparationOperation(args: {
+  workspaceId: string;
+  userId: string;
+  actionId: string;
+  provider?: AIProvider;
+}) {
+  const [action] = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.id, args.actionId),
+        eq(actions.workspaceId, args.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!action)
+    return {
+      status: "invalid" as const,
+      message: "Preparation was not found.",
+    };
+  if (action.executionStatus === "executing")
+    return {
+      status: "already_running" as const,
+      message: "Reply preparation is already running.",
+      jobId: action.jobId,
+    };
+  if (action.status === "pending_approval")
+    return {
+      status: "succeeded" as const,
+      message: "The reply is already ready for review.",
+      jobId: action.jobId,
+    };
+  const payload = action.payload as {
+    treatmentDecision?:
+      "commit_after_deck" | "need_deck_first" | "cannot_commit";
+    treatmentCondition?: string;
+  };
+  if (
+    !action.objectiveId ||
+    action.executionStatus !== "failed" ||
+    !payload.treatmentDecision
+  )
+    return {
+      status: "invalid" as const,
+      message: "This operation is not available for preparation retry.",
+      jobId: action.jobId,
+    };
+
+  const claimed = await db
+    .update(actions)
+    .set({
+      status: "executing",
+      executionStatus: "executing",
+      resolutionReason: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(actions.id, action.id),
+        eq(actions.workspaceId, args.workspaceId),
+        eq(actions.executionStatus, "failed"),
+      ),
+    )
+    .returning({ id: actions.id });
+  if (!claimed.length)
+    return {
+      status: "already_running" as const,
+      message: "Reply preparation is already running.",
+      jobId: action.jobId,
+    };
+  await db.insert(actionEvents).values({
+    id: id("aev"),
+    workspaceId: args.workspaceId,
+    actionId: action.id,
+    type: "preparation_retry_started",
+    fromStatus: "open",
+    toStatus: "executing",
+    reason: "manual_retry",
+  });
+  try {
+    await recordTreatmentCommitmentDecision({
+      workspaceId: args.workspaceId,
+      userId: args.userId,
+      objectiveId: action.objectiveId,
+      decision: payload.treatmentDecision,
+      condition: payload.treatmentCondition ?? null,
+      provider: args.provider,
+    });
+    return {
+      status: "succeeded" as const,
+      message: "Reply prepared. Review it before anything is sent.",
+      jobId: action.jobId,
+    };
+  } catch (error) {
+    const [failed] = await db
+      .select({ reason: actions.resolutionReason })
+      .from(actions)
+      .where(eq(actions.id, action.id))
+      .limit(1);
+    return {
+      status: "failed" as const,
+      message:
+        failed?.reason ??
+        (error instanceof Error
+          ? error.message
+          : "Reply preparation failed. The saved decision is unchanged."),
+      jobId: action.jobId,
+    };
   }
 }
 

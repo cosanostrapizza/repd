@@ -1,25 +1,19 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
 import { Plus } from "lucide-react";
-import { db } from "@/db/client";
-import { jobs, organizations } from "@/db/schema";
 import { requireContext } from "@/lib/auth";
+import { reevaluateWorkspace } from "@/lib/action-engine";
 import {
   bookingLabels,
   formatMoney,
   lifecycleLabels,
-  nextNeed,
 } from "@/lib/domain";
+import { getWorkspaceTodayState } from "@/lib/workspace-state";
 
 export const metadata = { title: "Jobs" };
 export default async function JobsPage() {
   const ctx = await requireContext();
-  const rows = await db
-    .select({ job: jobs, client: organizations.name })
-    .from(jobs)
-    .leftJoin(organizations, eq(jobs.clientOrganizationId, organizations.id))
-    .where(eq(jobs.workspaceId, ctx.workspaceId))
-    .orderBy(desc(jobs.updatedAt));
+  await reevaluateWorkspace(ctx.workspaceId);
+  const { jobs: rows } = await getWorkspaceTodayState(ctx.workspaceId);
   return (
     <div className="content">
       <div className="page-head">
@@ -57,7 +51,7 @@ export default async function JobsPage() {
           <div>Fee</div>
           <div>Next need</div>
         </div>
-        {rows.map(({ job, client }) => (
+        {rows.map(({ job, clientName: client, attention }) => (
           <Link className="list-row" href={`/jobs/${job.id}`} key={job.id}>
             <div>
               <strong>{job.title}</strong>
@@ -79,7 +73,7 @@ export default async function JobsPage() {
               </span>
             </div>
             <div>{formatMoney(job.feeCents, job.currency)}</div>
-            <div className="muted">{nextNeed(job)}</div>
+            <div className="muted">{attention.label}</div>
           </Link>
         ))}
         {!rows.length && (

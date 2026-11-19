@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, desc, eq, ne } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { CommunicationEditor } from "@/components/agent/communication-editor";
 import { InvoiceDraftEditor } from "@/components/agent/invoice-draft-editor";
 import { db } from "@/db/client";
@@ -35,6 +35,16 @@ export default async function ActionWorkspace({
     .limit(1);
   if (!row) notFound();
   const { action, job, person } = row;
+  if (
+    job &&
+    [
+      "producer_coordination",
+      "missing_information",
+      "advance_inquiry",
+      "treatment_commitment",
+    ].includes(action.kind)
+  )
+    redirect(`/jobs/${job.id}#coordination`);
   const header = (
     <header className="detail-head">
       <div className="detail-head-inner">
@@ -74,6 +84,7 @@ export default async function ActionWorkspace({
           eq(communications.workspaceId, ctx.workspaceId),
         ),
       )
+      .orderBy(desc(communications.createdAt))
       .limit(1);
     const allJobQuestions = job
       ? await db
@@ -210,7 +221,21 @@ export default async function ActionWorkspace({
           own.startsAt < other.hold.endsAt && own.endsAt > other.hold.startsAt,
       ),
     );
-    const cards = [...mine.map((hold) => ({ hold, job })), ...conflicts];
+    const conflictPayload = action.payload as { holdIds?: string[] };
+    const cards = conflictPayload.holdIds?.length
+      ? [
+          ...mine
+            .filter((hold) => conflictPayload.holdIds!.includes(hold.id))
+            .map((hold) => ({ hold, job })),
+          ...all.filter((item) =>
+            conflictPayload.holdIds!.includes(item.hold.id),
+          ),
+        ].filter(
+          (item, index, rows) =>
+            rows.findIndex((candidate) => candidate.hold.id === item.hold.id) ===
+            index,
+        )
+      : [...mine.map((hold) => ({ hold, job })), ...conflicts];
     return (
       <>
         {header}
@@ -219,7 +244,8 @@ export default async function ActionWorkspace({
             <main>
               <section className="card card-pad section">
                 <p className="eyebrow">Scheduling decision</p>
-                <h2>Competing work</h2>
+                <h2>{action.title}</h2>
+                <p>{action.explanation}</p>
                 {cards.map((item) => (
                   <article className="hold-decision" key={item.hold.id}>
                     <div>

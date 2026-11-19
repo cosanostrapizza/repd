@@ -6,7 +6,9 @@ import {
   coordinationDateOptions,
   coordinationObjectives,
   holds,
+  invoiceDrafts,
   jobs,
+  organizations,
   questions,
 } from "@/db/schema";
 
@@ -20,25 +22,15 @@ type Rule = {
   condition: { type: string; field?: string; value?: string };
   prepared?: string;
   approval?: boolean;
+  payload?: Record<string, unknown>;
 };
 
 function rulesFor(
   job: typeof jobs.$inferSelect,
-  hasConflict: boolean,
   hasInquiryObjective: boolean,
   hasKnownDateOptions: boolean,
 ): Rule[] {
   const rules: Rule[] = [];
-  if (hasConflict)
-    rules.push({
-      key: `hold-conflict:${job.id}`,
-      kind: "hold_conflict",
-      title: "Resolve competing hold",
-      explanation: `${job.title} overlaps another active booking.`,
-      recommendation: "Review both holds and decide which client has priority.",
-      priority: "urgent",
-      condition: { type: "no_hold_conflict" },
-    });
   if (
     job.lifecycleStatus === "inquiry" &&
     !job.usageTerms &&
@@ -59,6 +51,7 @@ function rulesFor(
   if (
     job.lifecycleStatus === "inquiry" &&
     !job.shootStart &&
+    !job.shootDate &&
     !hasKnownDateOptions &&
     !hasInquiryObjective
   )
@@ -72,22 +65,147 @@ function rulesFor(
       priority: "blocking",
       condition: { type: "job_field_present", field: "shootStart" },
     });
-  if (job.lifecycleStatus === "completed" && job.invoiceStatus === "not_ready")
+  if (
+    job.lifecycleStatus === "completed" &&
+    !["sent", "paid"].includes(job.invoiceStatus)
+  ) {
+    const missing = [
+      !job.feeCents && "agreed fee",
+      !job.paymentTerms && "payment terms",
+      !job.clientOrganizationId && "billing client",
+    ].filter((value): value is string => Boolean(value));
     rules.push({
       key: `invoice-ready:${job.id}`,
       kind: "invoice",
-      title: "Prepare invoice",
-      explanation: `${job.title} is complete and has not been invoiced.`,
-      recommendation:
-        "Review the fee and payment terms, then mark the invoice ready.",
+      title: missing.length ? "Complete invoice details" : "Invoice ready for review",
+      explanation: missing.length
+        ? `${job.title} cannot be prepared for invoicing until ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} recorded.`
+        : `Repd can prepare an internal invoice draft from the agreed fee, billing client, and payment terms.`,
+      recommendation: missing.length
+        ? `Record the missing ${missing.join(", ")} without inventing commercial terms.`
+        : "Review the prepared invoice draft. Issuance and delivery still require approval.",
       priority: "routine",
       condition: {
         type: "job_field_equals",
         field: "invoiceStatus",
-        value: "not_ready",
+        value: "sent",
       },
+      approval: !missing.length,
+      payload: { missingFields: missing },
     });
+  }
   return rules;
+}
+
+function overlapping(a: typeof holds.$inferSelect, b: typeof holds.$inferSelect) {
+  return a.jobId !== b.jobId && a.startsAt < b.endsAt && a.endsAt > b.startsAt;
+}
+
+function conflictGroups(activeHolds: Array<typeof holds.$inferSelect>) {
+  const remaining = new Set(activeHolds.map((hold) => hold.id));
+  const byId = new Map(activeHolds.map((hold) => [hold.id, hold]));
+  const groups: Array<Array<typeof holds.$inferSelect>> = [];
+  while (remaining.size) {
+    const firstId = remaining.values().next().value as string;
+    const queue = [byId.get(firstId)!];
+    const component: Array<typeof holds.$inferSelect> = [];
+    remaining.delete(firstId);
+    while (queue.length) {
+      const current = queue.shift()!;
+      component.push(current);
+      for (const candidateId of [...remaining]) {
+        const candidate = byId.get(candidateId)!;
+        if (overlapping(current, candidate)) {
+          remaining.delete(candidateId);
+          queue.push(candidate);
+        }
+      }
+    }
+    if (new Set(component.map((hold) => hold.jobId)).size > 1)
+      groups.push(component);
+  }
+  return groups;
+}
+
+async function prepareSafeInvoiceDrafts(workspaceId: string) {
+  const candidates = await db
+    .select({ action: actions, job: jobs, client: organizations })
+    .from(actions)
+    .innerJoin(jobs, eq(actions.jobId, jobs.id))
+    .leftJoin(organizations, eq(jobs.clientOrganizationId, organizations.id))
+    .where(
+      and(eq(actions.workspaceId, workspaceId), eq(actions.kind, "invoice")),
+    );
+  for (const { action, job, client } of candidates) {
+    if (
+      action.status === "resolved" ||
+      job.lifecycleStatus !== "completed" ||
+      !job.feeCents ||
+      !job.paymentTerms ||
+      !client
+    )
+      continue;
+    const agreedFeeCents = job.feeCents;
+    const [existing] = await db
+      .select()
+      .from(invoiceDrafts)
+      .where(
+        and(
+          eq(invoiceDrafts.workspaceId, workspaceId),
+          eq(invoiceDrafts.actionId, action.id),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      const created = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(invoiceDrafts)
+          .values({
+            id: id("invoice"),
+            workspaceId,
+            jobId: job.id,
+            actionId: action.id,
+            status: "ready",
+            lineItems: [
+              {
+                description: `Creative fee — ${job.title}`,
+                amountCents: agreedFeeCents,
+              },
+            ],
+            billingName: client.name,
+            paymentTerms: job.paymentTerms,
+          })
+          .onConflictDoNothing({ target: invoiceDrafts.actionId })
+          .returning({ id: invoiceDrafts.id });
+        if (!inserted.length) return false;
+        await tx
+          .update(jobs)
+          .set({ invoiceStatus: "ready", updatedAt: new Date() })
+          .where(eq(jobs.id, job.id));
+        await tx
+          .update(actions)
+          .set({
+            title: "Invoice ready for review",
+            status: "pending_approval",
+            executionStatus: "succeeded",
+            requiresApproval: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(actions.id, action.id));
+        return true;
+      });
+      if (created) await db.insert(actionEvents).values({
+        id: id("aev"),
+        workspaceId,
+        actionId: action.id,
+        type: "invoice_prepared_automatically",
+        fromStatus: action.status,
+        toStatus: "pending_approval",
+        reason: "source_backed_fields_complete",
+        metadata: { externalDelivery: false },
+      });
+    }
+  }
 }
 
 export async function reevaluateWorkspace(workspaceId: string) {
@@ -110,14 +228,37 @@ export async function reevaluateWorkspace(workspaceId: string) {
       .where(eq(coordinationDateOptions.workspaceId, workspaceId)),
   ]);
   const desired = new Map<string, Rule & { jobId: string }>();
-  for (const job of allJobs) {
-    const mine = activeHolds.filter((h) => h.jobId === job.id);
-    const conflict = mine.some((a) =>
-      activeHolds.some(
-        (b) =>
-          b.jobId !== job.id && a.startsAt < b.endsAt && a.endsAt > b.startsAt,
-      ),
+  const jobById = new Map(allJobs.map((job) => [job.id, job]));
+  for (const group of conflictGroups(activeHolds)) {
+    const holdIds = group.map((hold) => hold.id).sort();
+    const jobIds = [...new Set(group.map((hold) => hold.jobId))].sort();
+    const conflictJobs = jobIds
+      .map((jobId) => jobById.get(jobId))
+      .filter((job): job is typeof jobs.$inferSelect => Boolean(job));
+    if (!conflictJobs.length) continue;
+    const startsAt = group.reduce(
+      (earliest, hold) => (hold.startsAt < earliest ? hold.startsAt : earliest),
+      group[0].startsAt,
     );
+    const date = startsAt.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    const title = `Scheduling conflict — ${date}`;
+    const names = conflictJobs.map((job) => job.title);
+    desired.set(`hold-conflict:${holdIds.join(":")}`, {
+      key: `hold-conflict:${holdIds.join(":")}`,
+      kind: "hold_conflict",
+      title,
+      explanation: `${names.join(" and ")} have overlapping active holds. Decide which takes priority.`,
+      recommendation: "Review both jobs, hold rank, and booking status before authorizing a change.",
+      priority: "urgent",
+      condition: { type: "no_hold_conflict" },
+      payload: { holdIds, jobIds },
+      jobId: conflictJobs[0].id,
+    });
+  }
+  for (const job of allJobs) {
     const hasInquiryObjective = objectives.some(
       (objective) =>
         objective.jobId === job.id &&
@@ -129,7 +270,6 @@ export async function reevaluateWorkspace(workspaceId: string) {
     );
     for (const rule of rulesFor(
       job,
-      conflict,
       hasInquiryObjective,
       hasKnownDateOptions,
     ))
@@ -207,6 +347,7 @@ export async function reevaluateWorkspace(workspaceId: string) {
         resolutionCondition: rule.condition,
         requiresApproval: rule.approval ?? false,
         preparedContent: rule.prepared,
+        payload: rule.payload ?? {},
         reevaluatedAt: new Date(),
       });
     else if (
@@ -226,7 +367,15 @@ export async function reevaluateWorkspace(workspaceId: string) {
     else
       await db
         .update(actions)
-        .set({ reevaluatedAt: new Date() })
+        .set({
+          title: rule.title,
+          explanation: rule.explanation,
+          recommendation: rule.recommendation,
+          priority: rule.priority,
+          payload: rule.payload ?? found.payload,
+          requiresApproval: rule.approval ?? found.requiresApproval,
+          reevaluatedAt: new Date(),
+        })
         .where(eq(actions.id, found.id));
   }
   const deterministicKinds = new Set([
@@ -260,4 +409,5 @@ export async function reevaluateWorkspace(workspaceId: string) {
       reason: "condition_satisfied",
     });
   }
+  await prepareSafeInvoiceDrafts(workspaceId);
 }

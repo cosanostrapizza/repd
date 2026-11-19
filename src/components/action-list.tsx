@@ -10,6 +10,7 @@ const actionLabels: Record<string, string> = {
   invoice: "Prepare invoice",
   job_review: "Review changes",
   advance_inquiry: "Open coordination workspace",
+  treatment_commitment: "Decide treatment timing",
 };
 
 export function ActionList({
@@ -78,7 +79,20 @@ export function ActionList({
           </div>
           {a.status !== "resolved" && (
             <div className="action-controls">
-              <Link className="button small" href={`/actions/${a.id}`}>
+              <Link
+                className="button small"
+                href={
+                  a.jobId &&
+                  [
+                    "producer_coordination",
+                    "missing_information",
+                    "advance_inquiry",
+                    "treatment_commitment",
+                  ].includes(a.kind)
+                    ? `/jobs/${a.jobId}#coordination`
+                    : `/actions/${a.id}`
+                }
+              >
                 {actionLabels[a.kind] ?? "Open workspace"}
               </Link>
               <form action={transitionAction}>

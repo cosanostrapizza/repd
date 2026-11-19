@@ -1,153 +1,131 @@
-# Repd Implementation Checkpoint
+# Repd Agent-Native Redesign — Implementation Plan
 
-Last updated: 2026-11-17
-Checkpoint: Coordination-intelligence iteration complete
+**Updated:** 2026-11-18
+**Status:** Implemented and validated
 
-The product brief remains at `docs/repd-mvp-product-brief.md` for product vision and domain context. The Milestone 2 redesign supersedes conflicting interaction specifications: intake is briefing-first, job pages are living business briefs, and actions use purpose-built workspaces. This file preserves the original Milestone 1 history below and records the Milestone 2 evolution without retroactively redefining that checkpoint.
+## Architecture decisions
 
-## Coordination-intelligence iteration
+1. Preserve the relational business model and source/revision evidence system.
+2. Generalize objectives/dependencies for concurrent job workstreams without a
+   generic workflow engine.
+3. Keep actions as the only durable work/proposal primitive. Give each a stable
+   meaning and use completion/supersession for later steps.
+4. Add canonical job and Today projections consumed by UI and agent read tools.
+5. Add shared command services used by structured and conversational modes.
+6. Persist conversations and real operational run events, not model reasoning.
+7. Keep external communication, hold changes, invoice issuance, and delivery
+   behind explicit authorization.
 
-- Added a small persistent objective model for `advance_inquiry`: one objective per job, owned dependencies, evidence/result states, normalized date options, progress, completed steps, and a next action. This is deliberately not a generic workflow engine.
-- Added forward migration `0002_coordination_intelligence.sql`, workspace predicates, RLS policies, and unique keys that prevent duplicate objectives, dependencies, date options, and inquiry actions.
-- Preserved proposed budget minimum/maximum separately from `fee_cents`; added generated/source-confirmed/manual title provenance.
-- Persisted accepted agency identity as an organization, job participant, and producer affiliation.
-- Replaced empty-final-field action generation for objective-owned inquiries. Alternative dates no longer create “Confirm shoot date,” and one objective action groups the dependencies.
-- Added deterministic checks for each date, active holds, and client history. Results distinguish verified checks, no record found, and unavailable external calendar/contract evidence.
-- Added a contextual job workspace for interest, per-date requested-hold choices, and category-conflict judgment. Active holds are created only for dates explicitly authorized by the creative.
-- Delayed communication generation until decisions exist. The draft receives the job facts, proposed budget, exact date decisions, internal checks, conflict qualification, and only remaining external questions.
-- Extended reconciliation so accepted producer replies resolve matching dependencies/questions, preserve earlier decisions, record a before/after review, and advance the same objective/action.
-- Added identical-source retry prevention and durable AI failure behavior; sources and saved decisions survive provider failures.
+## Safe migration approach
 
-## Milestone 2 product evolution
+- Use forward-only additive schema changes for action/objective links and agent
+  conversation/run records.
+- Retain action, source, revision, communication, and objective data.
+- Make new foreign keys nullable for legacy records.
+- Interpret legacy work through the canonical projection.
+- Redirect or embed legacy workflow destinations rather than deleting data.
 
-- Replaced mandatory field-by-field inquiry acceptance with a structured opportunity briefing: understanding, opportunity facts, assessment, prioritized next moves, and an editable prepared response.
-- Moved fields, confidence, exact evidence, corrections, rejected interpretations, and match selection into optional progressive disclosure.
-- Extended the validated inquiry output with producer requests, relevant missing information, risks, recommendations, a suggested workflow state, requested-date semantics, hold-request intent, and a response draft.
-- Enforced the distinction between extraction acceptance and business confirmation. A requested first/second hold is persisted as unconfirmed request intent and deterministically remains `unbooked`; date alternatives remain separate and do not populate a continuous shoot range.
-- Persisted briefing analysis, source-backed request revisions, accepted-update activity, durable questions, actions, and communications so reloads retain the workflow.
-- Reworked response reconciliation around a coherent summary and changed facts, with granular correction remaining optional.
-- Reordered Job Detail around the current situation and prepared decisions. Alternative requested dates appear in the living brief without being represented as confirmed shoot dates.
-- Added a truthful Home “Waiting on” section for asked producer questions and removed unsupported “everything is on track” language.
-- Retained the specialized producer and hold workspaces and expanded invoice preparation into an editable internal preview. Saving a draft does not issue or send an invoice.
+## Implementation sequence
 
-## Milestone history
+1. Reliability: canonical filtering/priorities, concurrent projections, stable
+   actions, treatment failure/retry, dependency updates, obsolete filtering.
+2. Workspace UI: Today, Job Workspace active work, inline producer updates,
+   simplified navigation, and explicit failure/waiting states.
+3. Universal agent: durable threads/runs/events, contextual panel, cross-job
+   resolver, grounded answers, shared commands, and result links.
+4. Acceptance: New Balance mixed mode, cross-job resolution, Today priority,
+   concurrent work, failure recovery, routine inquiry, and existing safeguards.
 
-Milestone 1 established the functional local foundation described in the shipped increments below. Those increments remain historically accurate and continue to underpin Milestone 2.
+## Product-coherence refinement
 
-## Shipped increments
+- Today now uses the canonical responsibility split: needs you, Repd is
+  handling, waiting on others, and collapsed recent changes. It no longer
+  repeats a generated list of action titles or explains the product philosophy
+  in an everyday dashboard card.
+- Job Workspace is organized around current situation, next steps by owner,
+  and progressively disclosed job details. Generic objective state and
+  duplicate action/workstream sections are not primary UI.
+- Treatment retries reload the saved dependency decision and condition, resolve
+  every matching decision action, and reuse the same preparation action and
+  communication artifact. For retained legacy dependencies missing only the
+  condition, a retry may fill it from the trusted action payload when the saved
+  and requested decisions match.
+- Date-option reconciliation releases unselected requested/granted holds after
+  a client selection. The canonical projection also derives this state for
+  retained legacy records, preserving historical requests without presenting
+  them as current obligations.
+- Ask Repd is docked on desktop, full-screen on mobile, shares durable history
+  with /agent, defaults to concise outcomes, and keeps execution details
+  inspectable.
 
-### 1. Application foundation
+## Execution reliability and proactive preparation
 
-- Next.js 16 App Router, React 19, strict TypeScript, ESLint, Prettier, Vitest, and Playwright.
-- Responsive application shell with editorial typography, dark green/neutral palette, desktop sidebar, and mobile navigation.
-- PGlite persistence through Drizzle ORM, forward SQL migrations, idempotent representative seed data, and a health endpoint.
+- Retry preparation is a stateful client form with an immediate pending state,
+  duplicate-click prevention, and a visible success or failure result. The
+  command atomically claims the existing failed action and never records a
+  second treatment decision.
+- The retained New Balance provider calls succeeded technically but returned
+  drafts that weakened the conditional commitment into a future decision.
+  The artifact guard rejected them. Generation now names that forbidden
+  weakening explicitly, copies an immutable commitment sentence verbatim, and
+  validates the saved arrival timing before persisting a draft.
+- Transient provider failures receive one bounded automatic retry. Provider,
+  configuration, artifact-validation, and command/state failures are persisted
+  as distinct categories with attempt metadata.
+- Jobs now consumes the canonical workspace projection. Attention labels use
+  the same ranked work as Today, Job Workspace, and agent answers.
+- Overlapping active holds produce one shared conflict action keyed by the hold
+  identities. It appears in both job projections and Calendar but only once on
+  Today; no hold is changed without the existing explicit command.
+- Completed jobs with a confirmed fee, billing client, and payment terms get
+  one internal invoice draft during workspace reevaluation. A unique
+  action-to-draft index and conflict-safe insert prevent duplicates. Drafts
+  remain pending review and are never issued or sent automatically.
+- Empty Repd-handling and external-waiting owner groups are omitted.
 
-### 2. Identity and workspace isolation
+## Verification gate
 
-- Email/password signup and login with bcrypt password hashes.
-- Signed, HTTP-only, same-site JWT session cookie with a 14-day lifetime.
-- Workspaces, memberships, and owner/member roles.
-- Workspace predicates on application reads and mutations, cross-workspace not-found behavior, and RLS policies in migrations.
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm db:migrate
+```
 
-### 3. Jobs and living briefs
+Inspect desktop and mobile Today, a New Balance Job Workspace, the universal
+agent, failure recovery, and communication approval.
 
-- One Job entity across inquiry, tentative, confirmed, completed, and cancelled work.
-- Separate lifecycle and booking status with domain validation.
-- Manual creation and explicit editing, client, job type, dates, location, proposed/confirmed fee, currency, usage, deliverables, payment terms, invoice status, notes, participants, and activity.
-- Read-first Job Detail with Repd assessment, overview states, evidence register, open questions, prepared actions, activity, relationships, source documents, holds, and collapsed edit mode.
+### 2026-11-18 reliability and recovery result
 
-### 4. Relationships
+- `pnpm check`: passed (40 tests across 10 files)
+- `pnpm build`: passed
+- `pnpm test:e2e`: passed (20/20 across desktop and mobile)
+- The original PGlite cluster has a corrupt checkpoint pointer. It remains
+  byte-identical and is backed up; all repair and export work occurred on
+  copies. Candidate v3 was rebuilt as a clean cluster, all 27 table contents
+  matched the opened recovery source, no foreign-key violations were found,
+  and migration `0005` is applied.
+- Migration and seed CLIs now close PGlite in `finally` rather than terminating
+  with `process.exit()`. A lifecycle test closes, reopens, and verifies the
+  migrated file-backed database.
+- Candidate v3 passed the retained New Balance workflow with the real provider.
+  The result is a reviewable, unapproved, unsent draft that preserves the full
+  deck-arrival condition. Today, Jobs, Job Workspace, and Ask Repd agree, and
+  desktop/mobile layouts plus a clean application restart were inspected.
+- Browser QA runs against the migrated E2E database and covers Today, Jobs,
+  shared conflicts, automatic invoice review, New Balance mixed mode, and
+  desktop/mobile layouts.
+- Activation was explicitly approved and completed on 2026-11-18. Normal Repd
+  startup now uses candidate v3 at `.repd/repd.db`; the forensic original,
+  verified backup, and pre-activation candidate snapshot remain preserved.
+  Post-activation checks, production build, and 20/20 desktop/mobile browser
+  scenarios passed. Exact rollback commands are recorded in `PROJECT_STATE.md`.
 
-- Independent people and organizations with workspace-scoped duplicate checks and archive timestamps.
-- Temporal affiliations, primary/current organization display, reusable job participants, role snapshots, and shared-job history.
+## Documentation ownership
 
-### 5. Holds and calendar
-
-- First hold, second hold, and confirmed booking records with retained released/converted history.
-- Hold confirmation and release update the same Job.
-- Overlap detection, deterministic conflict actions, month navigation, Today, month/agenda views, and responsive calendar presentation.
-- Legacy midnight values display as all-day rather than fabricated call times.
-
-### 6. Durable action system
-
-- Workspace-unique deduplication keys, structured resolution conditions, payload/schema version fields, optional idempotency keys, priorities, status, execution status, approval metadata, resolution metadata, and action events.
-- Deterministic rules for hold conflicts, missing commercial usage, missing shoot date, and completed/uninvoiced work.
-- Reevaluation after relevant job, hold, and accepted-source changes.
-- Specialized UI dispatch for producer coordination, hold conflicts, invoice preparation, and fallback review actions.
-- Producer coordination resolves when referenced questions are answered or obsolete; deterministic actions resolve when their underlying condition disappears.
-
-### 7. AI-native inquiry and coordination workflow (Milestone 1 foundation)
-
-- Immutable-by-convention pasted sources stored before model execution with a content hash and source metadata.
-- Intake review states for new job, job update, and producer response flows.
-- OpenAI Responses API adapter with structured Zod parsing, configurable model, two SDK retries, 45-second timeout, and server-only credentials.
-- Tracked model runs with provider, model, purpose, schema version, request ID, input hash, output or failure, duration, and timestamps.
-- Source-backed extraction with evidence, confidence, visible conflicts, correction, per-field rejection, and deliberate create/merge choice. Milestone 2 retains these capabilities behind progressive disclosure instead of making them the default gate.
-- Accepted field revisions and contextual requirements for shoot date, commercial usage, location, fee, and payment terms.
-- Durable questions, prepared producer email, editing, model-assisted revision/tone change, approval, copy/`mailto:` handoff, explicit sent confirmation, and pasted-response reconciliation.
-
-### 8. Business-manager experience
-
-- Grounded Home briefing based on stored actions and jobs, with prepared work prioritized over metrics.
-- Action previews with contextual calls to action rather than generic Resolve as the primary control.
-- Internal invoice draft based on stored fee and payment terms.
-- Responsive desktop and mobile review/approval journeys, semantic form labels, visible state text, empty states, and error states.
-
-## Binding implementation decisions
-
-- Deterministic logic owns authorization, status validation, requirements, conflict detection, deduplication, and resolution. The model produces proposals and drafts.
-- The database is the source of truth. Model output passes Zod validation and user review before accepted values update a Job.
-- One Job persists throughout the opportunity lifecycle. Inquiry and booking are states, not separate entities.
-- Approval, handoff, execution, and resolution are distinct. Copying or opening an email does not imply delivery.
-- Original pasted text is stored before the model call so provider failures do not lose source material.
-- People and organizations are independent reusable records; job participation preserves role context.
-- Local development uses PGlite. PostgreSQL migrations and RLS policies are retained as the intended hosted contract, but hosted connection wiring is not implemented.
-- The application uses straightforward services and server actions rather than an agent framework or generic chatbot.
-
-## Verification record
-
-Verified for the coordination-intelligence iteration:
-
-- `pnpm typecheck` — passed.
-- `pnpm lint` — passed without warnings.
-- `pnpm test` — 18 tests passed across six files, including alternative-date requirements, requested-versus-granted holds, dependency ownership, proposed budget ranges, schema invariants, forward migrations, approval/execution separation, workspace scoping, and database URL normalization.
-- `pnpm test:e2e` — 16 journeys passed across desktop and mobile Chromium, including the complete New Balance coordination flow, explicit hold authorization, decision-conditioned drafting, provider failure/source preservation, declines, authentication, cross-workspace denial, response reconciliation, living-brief editing, and scheduling conflicts.
-- `pnpm build` — optimized production build passed.
-- `pnpm db:migrate` — forward migrations were current and idempotent against the preserved local database.
-- The exact `DATABASE_URL=file:./.repd/repd.db` form was verified after URL normalization was added.
-
-Live OpenAI execution is implemented and can be configured locally, but it was not part of the automated verification record. Automated model-dependent journeys use a test-only deterministic provider guarded by `AI_FIXTURE_MODE=test` plus a non-production or explicit Playwright flag.
-
-## Known limitations and technical debt
-
-- `src/db/client.ts` always constructs PGlite. A hosted PostgreSQL driver/provider path is not wired.
-- RLS policies exist, but the embedded owner connection bypasses normal RLS enforcement. Hosted use requires a non-owner role and transaction-level `app.workspace_id`; application-level workspace predicates are the active local boundary.
-- The credential auth implementation has no password reset, email verification, invitation flow, rate limiting, session revocation UI, or production account recovery. The development session secret fallback must not be used in production.
-- Existing-job match candidates use local title/client word overlap. There is no embedding index or model-based duplicate classifier.
-- Requested schedule alternatives and hold intent are normalized for new-inquiry objectives and also retain accepted source provenance. Only creative-authorized holds enter the `holds` table.
-- Agency identity is persisted for accepted new inquiries; richer agency history reconciliation and role changes are not modeled.
-- Source immutability is an application convention and metadata flag, not a database trigger or write-once permission.
-- Per-field rejection prevents an overwrite but does not create a separate rejected `job_field_revision`; accepted non-null values receive revisions.
-- Contextual requirement policy covers only five fields and a small set of job-type/stage rules.
-- Action supersession columns exist, but an end-to-end supersede workflow is not implemented. Most obsolete work is represented as resolved with `condition_satisfied`.
-- Action reevaluation scans all jobs and actions in a workspace; there is no dependency index, queue, or background worker.
-- AI communication failures are recorded in `ai_runs`; the objective enters `needs_attention` while saved decisions remain available for retry.
-- Home briefing prose is deterministic. There is no live LLM-generated daily summary.
-- Email uses copy and `mailto:`. “Sent” is an explicit user assertion, not provider-confirmed delivery.
-- Calendar records do not store temporal precision. Midnight is inferred as all-day for presentation.
-- Invoice drafts do not support invoice numbers, taxes, discounts, PDFs, delivery, accounting sync, or payments.
-- There is no file upload, object storage, OCR, attachment ingestion, Gmail sync, external calendar sync, background processing, or observability service.
-
-## Deferred work
-
-- Real email provider and inbox ingestion.
-- Hosted PostgreSQL adapter and production RLS transaction context.
-- Richer reconciliation and complete organization/agency persistence.
-- Typed action payload registry and broader resolution/supersession workflows.
-- File/document ingestion and source management.
-- Invoice document generation and accounting/payment integrations.
-- Background jobs, retry orchestration, monitoring, and operational auth controls.
-
-## Checkpoint note
-
-The local database URL compatibility issue was fixed by normalizing both `file:./.repd/repd.db` and `file://.repd/repd.db`, deriving local parent directories consistently, and clearing a rejected migration promise so development retries are possible after transient failures or hot reloads.
+- `docs/repd-mvp-product-brief.md`: product contract
+- `docs/agent-native-architecture.md`: UX/domain/agent architecture
+- `IMPLEMENTATION.md`: implementation decisions and acceptance gate
+- `PROJECT_STATE.md`: implemented reality, limitations, next priorities

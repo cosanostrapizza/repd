@@ -13,6 +13,7 @@ export function evaluateRequirements(job: {
   lifecycleStatus: string;
   usageTerms?: string | null;
   shootStart?: Date | null;
+  shootDate?: string | null;
   location?: string | null;
   feeCents?: number | null;
   paymentTerms?: string | null;
@@ -24,16 +25,17 @@ export function evaluateRequirements(job: {
     fieldKey: "shootStart",
     label: "Shoot date",
     state:
-      !job.shootStart && inquiry && !job.requestedDateCount
+      !job.shootStart && !job.shootDate && inquiry && !job.requestedDateCount
         ? "required_now"
-        : job.shootStart
+        : job.shootStart || job.shootDate
           ? "optional"
           : "required_later",
-    reason: job.shootStart
-      ? "A date is already on file."
-      : job.requestedDateCount
-        ? `${job.requestedDateCount} proposed date ${job.requestedDateCount === 1 ? "option is" : "options are"} already preserved; a finalized shoot date is not required for initial review.`
-        : "Availability cannot be evaluated without a shoot date.",
+    reason:
+      job.shootStart || job.shootDate
+        ? "A date is already on file."
+        : job.requestedDateCount
+          ? `${job.requestedDateCount} proposed date ${job.requestedDateCount === 1 ? "option is" : "options are"} already preserved; a finalized shoot date is not required for initial review.`
+          : "Availability cannot be evaluated without a shoot date.",
     askExternalParty: true,
   });
   const usageRequired = job.jobType === "commercial" && inquiry;

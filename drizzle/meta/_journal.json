@@ -22,6 +22,27 @@
       "when": 1794978000000,
       "tag": "0002_coordination_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794981600000,
+      "tag": "0003_calendar_date_semantics",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795032000000,
+      "tag": "0004_agent_native_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795057200000,
+      "tag": "0005_execution_reliability",
+      "breakpoints": true
     }
   ]
 }

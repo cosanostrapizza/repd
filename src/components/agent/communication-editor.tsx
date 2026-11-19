@@ -51,6 +51,10 @@ export function CommunicationEditor({
     reviseCommunication,
     initial,
   );
+  const [approveState, approveAction] = useActionState(
+    approveCommunication,
+    initial,
+  );
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
   const handoff = async (method: "copy" | "client") => {
@@ -67,14 +71,14 @@ export function CommunicationEditor({
   };
   const mailto = `mailto:${encodeURIComponent(communication.toEmail ?? "")}?subject=${encodeURIComponent(communication.subject)}&body=${encodeURIComponent(communication.body)}`;
   return (
-    <div className="communication-workspace">
-      <section className="card card-pad">
-        <div className="section-title">
+    <div className="communication-workspace compact-communication">
+      <section className="communication-draft">
+        <div className="communication-title">
           <div>
             <p className="eyebrow">
-              Prepared communication · revision {communication.revision}
+              Prepared reply · revision {communication.revision}
             </p>
-            <h2>Producer email</h2>
+            <h2>Reply to the producer</h2>
           </div>
           <span className={`state-pill ${communication.status}`}>
             {communication.status.replaceAll("_", " ")}
@@ -86,81 +90,89 @@ export function CommunicationEditor({
             name="communicationId"
             value={communication.id}
           />
-          <div className="field">
-            <label htmlFor="toEmail">To</label>
-            <input
-              id="toEmail"
-              name="toEmail"
-              type="email"
-              defaultValue={communication.toEmail ?? ""}
-              placeholder="Recipient email missing"
-            />
+          <div className="communication-address">
+            <label>
+              <span>To</span>
+              <input
+                aria-label="To"
+                name="toEmail"
+                type="email"
+                defaultValue={communication.toEmail ?? ""}
+                placeholder="Recipient email missing"
+              />
+            </label>
+            <label>
+              <span>Subject</span>
+              <input
+                aria-label="Subject"
+                name="subject"
+                defaultValue={communication.subject}
+              />
+            </label>
           </div>
           <div className="field">
-            <label htmlFor="subject">Subject</label>
-            <input
-              id="subject"
-              name="subject"
-              defaultValue={communication.subject}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="body">Message</label>
+            <label htmlFor="body">Draft</label>
             <textarea
               id="body"
               name="body"
-              rows={14}
+              rows={10}
               defaultValue={communication.body}
             />
           </div>
           <Message state={saveState} />
-          <div className="form-actions">
-            <SubmitButton className="button secondary">Save draft</SubmitButton>
+          <div className="draft-actions">
+            <SubmitButton className="button secondary small">
+              Save edits
+            </SubmitButton>
+            <span>Edits remain a draft until approved.</span>
           </div>
         </form>
-      </section>
-      <aside className="workspace-rail">
-        <section className="card card-pad">
-          <p className="eyebrow">Questions this should answer</p>
-          {questions.map((q) => (
-            <div className="question-row" key={q.id}>
-              <strong>{q.question}</strong>
-              <p>{q.whyItMatters}</p>
-              <span className={`state-pill ${q.status}`}>{q.status}</span>
-            </div>
-          ))}
-        </section>
-        <section className="card card-pad">
-          <p className="eyebrow">Ask Repd to revise</p>
+        <details className="communication-tools">
+          <summary>Revise with Repd</summary>
           <form action={rewriteAction}>
             <input
               type="hidden"
               name="communicationId"
               value={communication.id}
             />
-            <div className="field">
-              <label htmlFor="tone">Tone</label>
-              <select id="tone" name="tone">
-                <option value="warm">Warm</option>
-                <option value="direct">Direct</option>
-                <option value="concise">More concise</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="instruction">Optional direction</label>
-              <input
-                id="instruction"
-                name="instruction"
-                placeholder="Make the opening less formal…"
-              />
+            <div className="inline-fields">
+              <label className="field">
+                <span>Tone</span>
+                <select name="tone">
+                  <option value="warm">Warm</option>
+                  <option value="direct">Direct</option>
+                  <option value="concise">More concise</option>
+                </select>
+              </label>
+              <label className="field grow">
+                <span>Direction</span>
+                <input
+                  name="instruction"
+                  placeholder="Make the opening less formal…"
+                />
+              </label>
+              <SubmitButton className="button secondary small">
+                Revise
+              </SubmitButton>
             </div>
             <Message state={rewriteState} />
-            <SubmitButton className="button secondary">
-              Regenerate draft
-            </SubmitButton>
           </form>
-        </section>
-      </aside>
+        </details>
+        {questions.length > 0 && (
+          <details className="communication-tools">
+            <summary>
+              Supporting context · {questions.length} open{" "}
+              {questions.length === 1 ? "item" : "items"}
+            </summary>
+            {questions.map((q) => (
+              <div className="question-row" key={q.id}>
+                <strong>{q.question}</strong>
+                <span className={`state-pill ${q.status}`}>{q.status}</span>
+              </div>
+            ))}
+          </details>
+        )}
+      </section>
       <section className="approval-bar">
         <div>
           <strong>
@@ -170,13 +182,14 @@ export function CommunicationEditor({
           </strong>
           <p>
             {communication.status === "draft"
-              ? "Approval records your decision. It does not send the email."
-              : "Choose a real handoff method. Repd will not claim delivery until you confirm it."}
+              ? "Approval does not send this email."
+              : "Choose a handoff method, then confirm only after sending."}
           </p>
+          <Message state={approveState} />
         </div>
         <div className="approval-actions">
           {communication.status === "draft" && (
-            <form action={approveCommunication}>
+            <form action={approveAction}>
               <input
                 type="hidden"
                 name="communicationId"

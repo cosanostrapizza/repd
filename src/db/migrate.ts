@@ -1,11 +1,18 @@
-import { ensureDatabase } from "./client";
+import { closeDatabase, ensureDatabase } from "./client";
 async function main() {
   await ensureDatabase();
   console.log("Repd database migrations are current.");
 }
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
+
+async function run() {
+  try {
+    await main();
+  } catch (error) {
     console.error(error);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  } finally {
+    await closeDatabase();
+  }
+}
+
+void run();

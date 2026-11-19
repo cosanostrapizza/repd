@@ -101,19 +101,29 @@ class FixtureAIProvider implements AIProvider {
       fixture = {
         isJobInquiry: true,
         summary: response
-          ? "A producer supplied usage details for the existing campaign."
+          ? newBalance
+            ? "Sarah selected December 16, clarified usage and photography deliverables, and requested a five-slide treatment by November 23 after sending the deck."
+            : "A producer supplied usage details for the existing campaign."
           : adidas
             ? "Jamie is checking availability for an Adidas campaign on one of two possible dates and has asked for first holds while commercial terms are still taking shape."
             : newBalance
               ? "Sarah at Wieden+Kennedy is exploring a one-day New Balance shoot on December 16 or 17 and is requesting second holds. The indicative photography budget is $6–8k, with licensing and treatment expectations unresolved."
               : "A commercial campaign inquiry with dates, fee, and producer details; usage is not specified.",
         assessment: response
-          ? "The usage response resolves the main licensing question; the stored job should be updated without changing unrelated terms."
+          ? newBalance
+            ? "The client-selected date is not a booking confirmation. The commercial clarifications resolve earlier uncertainty, while Alex still needs to decide whether the treatment deadline is workable after reviewing the promised deck."
+            : "The usage response resolves the main licensing question; the stored job should be updated without changing unrelated terms."
           : newBalance
             ? "This is an early commercial opportunity. Repd should check the two alternative dates and relevant history before Alex decides whether to engage or grant either requested second hold."
             : "This is an early commercial inquiry. The requested dates and fee can be considered, but usage must be defined before the scope can be evaluated.",
         producerRequests: response
-          ? ["Apply the clarified usage to the existing campaign."]
+          ? newBalance
+            ? [
+                "Note December 16 as the client-selected shoot date.",
+                "Use the clarified US paid social, web, and retail terms for 12 months.",
+                "Prepare a five-slide treatment by November 23 after the deck arrives.",
+              ]
+            : ["Apply the clarified usage to the existing campaign."]
           : newBalance
             ? [
                 "Consider second holds for December 16 and 17.",
@@ -210,8 +220,8 @@ class FixtureAIProvider implements AIProvider {
             ? [
                 {
                   label: "December 16, 2026",
-                  start: "2026-12-16T14:00:00.000Z",
-                  end: "2026-12-17T00:00:00.000Z",
+                  start: "2026-12-16",
+                  end: "2026-12-16",
                   relationship: "alternative",
                   confidence: 0.98,
                   evidence: {
@@ -222,8 +232,8 @@ class FixtureAIProvider implements AIProvider {
                 },
                 {
                   label: "December 17, 2026",
-                  start: "2026-12-17T14:00:00.000Z",
-                  end: "2026-12-18T00:00:00.000Z",
+                  start: "2026-12-17",
+                  end: "2026-12-17",
                   relationship: "alternative",
                   confidence: 0.98,
                   evidence: {
@@ -236,8 +246,8 @@ class FixtureAIProvider implements AIProvider {
             : [
                 {
                   label: "March 18–19, 2027",
-                  start: "2027-03-18T12:00:00.000Z",
-                  end: "2027-03-19T12:00:00.000Z",
+                  start: "2027-03-18",
+                  end: "2027-03-19",
                   relationship: "range",
                   confidence: 0.96,
                   evidence: {
@@ -311,13 +321,11 @@ class FixtureAIProvider implements AIProvider {
             ? extracted(null)
             : extracted("maya@example.com"),
         shootStart:
-          adidas || newBalance
+          adidas || (newBalance && !response)
             ? extracted(null)
-            : extracted("2027-03-18T12:00:00.000Z"),
+            : extracted(newBalance ? "2026-12-16" : "2027-03-18"),
         shootEnd:
-          adidas || newBalance
-            ? extracted(null)
-            : extracted("2027-03-19T12:00:00.000Z"),
+          adidas || newBalance ? extracted(null) : extracted("2027-03-19"),
         dateOnly: true,
         location: extracted(
           newBalance ? "Manhattan or upstate New York" : "Brooklyn, NY",
@@ -327,7 +335,11 @@ class FixtureAIProvider implements AIProvider {
           : extracted(adidas ? 350000 : 850000),
         currency: extracted("USD"),
         usageTerms: response
-          ? extracted("Worldwide digital and social, 12 months")
+          ? extracted(
+              newBalance
+                ? "US paid social, web, and retail, 12 months"
+                : "Worldwide digital and social, 12 months",
+            )
           : extracted(null),
         deliverables: extracted(
           newBalance
@@ -337,8 +349,8 @@ class FixtureAIProvider implements AIProvider {
               : "Campaign stills and select social crops",
         ),
         paymentTerms: adidas ? extracted(null) : extracted("Net 30"),
-        bookingStatus: extracted("unbooked"),
-        lifecycleStatus: extracted("inquiry"),
+        bookingStatus: response ? extracted(null) : extracted("unbooked"),
+        lifecycleStatus: response ? extracted(null) : extracted("inquiry"),
         relevantNotes: newBalance
           ? [
               "One-day shoot",
@@ -350,10 +362,81 @@ class FixtureAIProvider implements AIProvider {
                 : []),
             ]
           : [],
+        operationalObligations:
+          newBalance && response
+            ? [
+                {
+                  key: "treatment_scope",
+                  label: "Prepare a five-slide treatment",
+                  owner: "creative",
+                  status: "informational",
+                  dueDate: "2026-11-23",
+                  prerequisite: "Review the producer's promised deck",
+                  evidence: {
+                    quote: "five-slide treatment due November 23",
+                    rationale:
+                      "The response defines treatment scope and timing.",
+                  },
+                },
+                {
+                  key: "deck_arrival",
+                  label: "Producer to send the creative deck",
+                  owner: "external",
+                  status: "promised",
+                  dueDate: null,
+                  prerequisite: null,
+                  evidence: {
+                    quote: "I'll send the deck",
+                    rationale: "The deck is promised but not yet received.",
+                  },
+                },
+                {
+                  key: "treatment_deadline",
+                  label:
+                    "Decide whether to commit to the November 23 treatment deadline",
+                  owner: "creative",
+                  status: "needs_decision",
+                  dueDate: "2026-11-23",
+                  prerequisite: "Review the producer's promised deck",
+                  evidence: {
+                    quote: "due November 23",
+                    rationale:
+                      "Alex must decide whether the deadline is workable.",
+                  },
+                },
+              ]
+            : [],
         suggestedMatchTitle: response ? "Nike Spring Campaign" : null,
         suggestedMatchReason: response
           ? "The campaign title and producer match."
           : null,
+      };
+    } else if (purpose === "treatment_commitment_communication") {
+      const parsed = JSON.parse(input) as {
+        producer: { name: string | null } | null;
+        immutableBusinessFacts: {
+          requiredCommitmentSentence: string;
+        };
+        treatment: {
+          decision: "commit_after_deck" | "need_deck_first" | "cannot_commit";
+          dueDate: string | null;
+          condition?: string | null;
+        };
+      };
+      const name = parsed.producer?.name ?? "Sarah";
+      const decision = parsed.treatment.decision;
+      const requiredCommitmentSentence =
+        parsed.immutableBusinessFacts.requiredCommitmentSentence;
+      fixture = {
+        subject: "New Balance treatment timing",
+        body:
+          decision === "commit_after_deck"
+            ? `Hi ${name},\n\nThanks for the update. ${requiredCommitmentSentence} I have noted December 16 as the client-selected shoot date; this does not confirm the booking.\n\nBest,\nAlex`
+            : decision === "need_deck_first"
+              ? `Hi ${name},\n\nThanks for the update. ${requiredCommitmentSentence} I have noted December 16 as the client-selected shoot date; this does not confirm the booking.\n\nBest,\nAlex`
+              : `Hi ${name},\n\nThanks for the update. ${requiredCommitmentSentence} I have noted December 16 as the client-selected shoot date; this does not confirm the booking.\n\nBest,\nAlex`,
+        tone: "warm",
+        questions: [],
       };
     } else if (purpose === "missing_information_analysis")
       fixture = {

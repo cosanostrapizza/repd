@@ -16,8 +16,60 @@ test("signed-out users are redirected", async ({ page }) => {
 });
 test("demo workspace presents real actions and conflicts", async ({ page }) => {
   await signIn(page);
+  await expect(
+    page.getByRole("heading", { name: "Resolve hold conflict" }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("Invoice ready for review").first(),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Calendar" }).first().click();
   await expect(page.getByText(/Scheduling conflict/)).toBeVisible();
+});
+
+test("jobs share canonical attention and invoice preparation is idempotent", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.reload();
+  await page.goto("/jobs");
+  await expect(page.locator('a.list-row[href="/jobs/job_nike"]')).toContainText(
+    "Review producer reply",
+  );
+  await expect(
+    page.locator('a.list-row[href="/jobs/job_editorial"]'),
+  ).toContainText("Resolve hold conflict");
+  await expect(page.locator('a.list-row[href="/jobs/job_acme"]')).toContainText(
+    "Invoice ready for review",
+  );
+  await expect(
+    page.locator('a.list-row[href="/jobs/job_confirmed"]'),
+  ).toContainText("On track");
+  await page.goto("/jobs/job_acme");
+  await page.getByRole("link", { name: "Review invoice" }).last().click();
+  await expect(page.locator(".invoice-preview")).toHaveCount(1);
+  await expect(page.getByText(/has not been issued or sent/i)).toBeVisible();
+});
+
+test("the universal agent resolves cross-job context and shows real execution steps", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Ask Repd" }).click();
+  await page
+    .getByPlaceholder(/Ask Repd/)
+    .fill("What's holding up the Nike Spring job?");
+  await page
+    .locator(".agent-composer")
+    .getByRole("button", { name: "Send to Repd" })
+    .click();
+  await expect(page.locator(".agent-response")).toContainText(/Nike/);
+  await page.getByText("View execution details").click();
+  await expect(page.getByText(/Found Nike/)).toBeVisible();
+  await expect(
+    page.getByText("Checked current work and waiting conditions"),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open job" })).toBeVisible();
+  await expect(page.locator("html")).toHaveClass(/agent-panel-open/);
 });
 test("one workspace cannot read another workspace job", async ({
   page,
@@ -87,76 +139,156 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(
     page.getByText("December 16, 2026 or December 17, 2026"),
   ).toBeVisible();
-  await expect(page.getByText("Second hold requested")).toBeVisible();
+  await expect(
+    page.getByText("Second hold requested", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Requested—not granted")).toBeVisible();
   await expect(page.getByText(/\$6,000–\$8,000/)).toBeVisible();
-  await expect(
-    page.getByText("Communication comes after your decisions"),
-  ).toBeVisible();
-  await expect(page.getByLabel("Message")).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Create job & review next steps" })
-    .click();
+  await page.getByText("Details & source").click();
+  await expect(page.getByText(/potential New Balance project/)).toBeVisible();
+  await expect(page.getByLabel("Draft")).toHaveCount(0);
+  await page.getByLabel("Yes").check();
+  await page.getByLabel("Decision for December 16, 2026").selectOption("offer");
+  await page.getByLabel("Decision for December 17, 2026").selectOption("defer");
+  await page.getByLabel("None known").check();
+  await page.getByRole("button", { name: "Continue to reply" }).click();
   await expect(
     page.getByRole("heading", { name: "New Balance Campaign", level: 1 }),
   ).toBeVisible();
-  await expect(page.getByText("Unbooked").first()).toBeVisible();
   await expect(
-    page.getByText("December 16, 2026 or December 17, 2026").first(),
+    page.locator(".detail-meta").getByText("2nd hold"),
+  ).toBeVisible();
+  await expect(page.getByText("December 16, 2026").first()).toBeVisible();
+  await expect(page.getByText("December 17, 2026").first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Where things stand" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", {
-      name: "Advance New Balance Campaign opportunity",
-    }),
+    page.getByRole("heading", { name: "Who has the next move" }),
   ).toBeVisible();
-  await expect(page.getByText("Repd has checked")).toBeVisible();
-  await expect(
-    page.getByText(/External calendars were not checked/).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Current objective")).toHaveCount(0);
   await expect(page.getByText("Confirm shoot date")).toHaveCount(0);
-  await expect(page.getByText("Sarah").first()).toBeVisible();
-  await expect(page.getByText("Wieden+Kennedy").first()).toBeVisible();
-  await page.getByLabel("Yes, explore the opportunity").check();
-  await page.getByLabel("Decision for December 16, 2026").selectOption("offer");
-  await page.getByLabel("Decision for December 17, 2026").selectOption("defer");
-  await page.getByLabel("No known conflict").check();
-  await page
-    .getByRole("button", { name: "Prepare the right response" })
-    .click();
+  await page.getByText("People and organizations").click();
   await expect(
-    page.getByRole("heading", { name: "Producer email" }),
+    page.locator(".person-record").filter({ hasText: "Sarah" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Message")).toContainText(
+  await expect(
+    page
+      .locator(".person-record")
+      .filter({ hasText: "Wieden+Kennedy" })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Reply to the producer" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Draft")).toContainText(
     "second hold on December 16, 2026",
   );
-  await expect(page.getByLabel("Message")).not.toContainText(
+  await expect(page.getByLabel("Draft")).not.toContainText(
     "second hold on December 17, 2026",
   );
+  await page.getByText(/Supporting context/).click();
   await expect(
-    page.getByText(
-      "Does the photography budget include usage, or can licensing be separated?",
-      { exact: true },
-    ),
+    page
+      .locator(".communication-tools")
+      .getByText(
+        "Does the photography budget include usage, or can licensing be separated?",
+        { exact: true },
+      ),
   ).toBeVisible();
-  await expect(page.getByText("Not confirmed sent")).toBeVisible();
   await page.getByRole("button", { name: "Approve draft" }).click();
-  await expect(page.getByText("Approved for handoff")).toBeVisible();
-  await expect(page.getByText("Not confirmed sent")).toBeVisible();
+  await expect(page.getByText("Approved for handoff").first()).toBeVisible();
   await page.getByRole("button", { name: "I sent it" }).click();
-  await expect(page.getByText("User confirmed sent")).toBeVisible();
-  await page.getByRole("link", { name: "View New Balance Campaign" }).click();
-  await expect(page.getByText("awaiting external")).toBeVisible();
-  await page.getByRole("link", { name: "Add producer response" }).click();
+  await expect(
+    page.getByRole("heading", { name: /Waiting on others/ }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Add update" }).first().click();
   await page
     .getByLabel("Paste the producer’s response")
     .fill(
-      `Hi Alex — usage will be separated from the photography budget. US paid social, web, and retail for 12 months. The treatment should be five slides based on the deck, due next Tuesday. Reference ${testInfo.project.name}.`,
+      `Hi Alex — the client selected December 16, 2026 for the shoot, but this is not a confirmed booking. Please keep the second hold in place. Usage will be separated from the photography budget: US paid social, web, and retail for 12 months. Photography deliverables are 20–25 final selects with basic retouching. I'll send the creative deck tomorrow. The treatment should be five slides based on that deck and is due November 23, 2026. Reference ${testInfo.project.name}.`,
     );
   await page.getByRole("button", { name: "Review new information" }).click();
-  await expect(page.getByText("Before → after")).toBeVisible();
-  await page.getByRole("button", { name: "Accept coherent update" }).click();
-  await expect(page.getByText("ready to advance")).toBeVisible();
-  await expect(page.getByText("Review the producer’s update")).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", { name: "Sarah replied" }),
+  ).toBeVisible();
+  await expect(page.getByText("Updated", { exact: true })).toBeVisible();
+  await expect(page.getByText("conflicting", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Update job" }).click();
+  await expect(page.getByText("December 16, 2026").first()).toBeVisible();
+  await expect(
+    page.locator(".detail-meta .badge").filter({ hasText: /^Confirmed$/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(".detail-meta .badge").filter({ hasText: "2nd hold" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".record-row").filter({ hasText: "December 16, 2026" }),
+  ).toContainText("Selected date");
+  await expect(
+    page.locator(".record-row").filter({ hasText: "December 16, 2026" }),
+  ).toContainText("Active hold");
+  await expect(
+    page.locator(".record-row").filter({ hasText: "December 17, 2026" }),
+  ).toContainText("Historical option");
+  await expect(
+    page.locator(".record-row").filter({ hasText: "December 17, 2026" }),
+  ).toContainText("Released");
+  await page.getByText("People and organizations").click();
+  await expect(
+    page.locator(".person-record").filter({ hasText: "Sarah" }),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(".fact-row").filter({ hasText: "Usage" }),
+  ).toContainText("US paid social, web, and retail, 12 months");
+  await expect(
+    page.locator(".fact-row").filter({ hasText: "Deliverables" }),
+  ).toContainText("20–25 selects; basic retouching");
+  await expect(
+    page.locator(".fact-row").filter({ hasText: "Deliverables" }),
+  ).not.toContainText("treatment");
+  await expect(
+    page.locator("#next-steps").getByRole("strong").filter({
+      hasText: "Producer to send the creative deck",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("Review the producer’s update")).toHaveCount(0);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ask Repd" }).click();
+  await page
+    .getByPlaceholder(/Ask Repd/)
+    .fill(
+      "Tell Sarah I can meet the treatment deadline if the deck arrives tomorrow.",
+    );
+  await page
+    .locator(".agent-composer")
+    .getByRole("button", { name: "Send to Repd" })
+    .click();
+  await expect(page.locator(".agent-response")).toContainText(
+    "including that the deck must arrive tomorrow",
+  );
+  await page.getByText("View execution details").click();
+  await expect(
+    page.getByText("Recorded the treatment decision", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Prepared the producer reply")).toBeVisible();
+  await expect(page.getByText("Reply is ready for approval")).toBeVisible();
+  await page.getByRole("link", { name: "Open job" }).click();
+  await expect(
+    page.getByText("Conditional treatment commitment recorded"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Decide whether to commit to the treatment deadline"),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Reply to the producer" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Draft")).toContainText(
+    "I can meet the 2026-11-23 treatment deadline provided that the promised deck arrives tomorrow and can be reviewed.",
+  );
+  await expect(page.getByLabel("Draft")).toContainText(
+    "does not confirm the booking",
+  );
 });
 
 test("producer response proposes and reconciles an answer", async ({
@@ -171,20 +303,26 @@ test("producer response proposes and reconciles an answer", async ({
     );
   await page.getByRole("button", { name: "Review new information" }).click();
   await expect(
-    page.getByRole("heading", { name: /What changed for/ }),
+    page.getByText("Producer update incorporated", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Proposed changes")).toBeVisible();
-  await expect(
-    page.getByText("Worldwide digital and social, 12 months").first(),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Accept coherent update" }).click();
   await expect(
     page.getByRole("heading", { name: /Nike (Run Division|Spring)/, level: 1 }),
   ).toBeVisible();
   await expect(
     page
-      .locator(".brief-field strong")
+      .locator(".fact-row strong")
       .filter({ hasText: "Worldwide digital and social, 12 months" }),
+  ).toBeVisible();
+  await page.getByText("Activity and sources").click();
+  await expect(
+    page
+      .locator(".disclosure-body")
+      .getByText(/Accepted a producer update/)
+      .first(),
+  ).toBeVisible();
+  await page.locator(".source-document summary").first().click();
+  await expect(
+    page.getByText(/confirmed: worldwide digital and social usage/).first(),
   ).toBeVisible();
 });
 
@@ -215,22 +353,17 @@ test("declining an opportunity prepares a decline without commercial questions",
       `New Balance inquiry from Sarah at Wieden+Kennedy for a one-day campaign on December 16 or 17. The $6–8k photography budget may not include usage. Please place second holds and confirm interest and category conflicts. Treatment deck available next week. Reference decline ${testInfo.project.name}.`,
     );
   await page.getByRole("button", { name: "Understand inquiry" }).click();
-  await page
-    .getByRole("button", { name: "Create job & review next steps" })
-    .click();
-  await page.getByLabel("No, decline").check();
+  await page.getByLabel("Pass").check();
   await page
     .getByLabel("Decision for December 16, 2026")
     .selectOption("decline");
   await page
     .getByLabel("Decision for December 17, 2026")
     .selectOption("decline");
-  await page.getByLabel("No known conflict").check();
-  await page
-    .getByRole("button", { name: "Prepare the right response" })
-    .click();
-  await expect(page.getByLabel("Message")).toContainText("pass this time");
-  await expect(page.getByLabel("Message")).not.toContainText(
+  await page.getByLabel("None known").check();
+  await page.getByRole("button", { name: "Continue to reply" }).click();
+  await expect(page.getByLabel("Draft")).toContainText("pass this time");
+  await expect(page.getByLabel("Draft")).not.toContainText(
     "Does the photography budget include usage",
   );
 });

@@ -96,6 +96,7 @@ export default async function ReviewPage({
   const fields = extractionFields(extraction).map((field) => {
     const existing = target?.[field.key as keyof typeof target];
     const conflict =
+      row.review.kind !== "producer_response" &&
       existing !== undefined &&
       existing !== null &&
       field.value !== null &&
@@ -110,57 +111,51 @@ export default async function ReviewPage({
     <div className="content">
       <div className="page-head">
         <div>
-          <p className="eyebrow">Repd’s proposed understanding</p>
+          <p className="eyebrow">
+            {target ? "Producer update" : "New inquiry"}
+          </p>
           <h1>
             {target
-              ? `What changed for ${target.title}`
+              ? `${extraction.producerName.value ?? "The producer"} replied`
               : (extraction.jobTitle.value ?? "New opportunity")}
           </h1>
           <p className="lede">
             {target
-              ? "Review the update as a whole. Correct a detail only when Repd misunderstood it."
-              : "Repd has read the message, assessed the opportunity, and prepared the next move."}
+              ? target.title
+              : [extraction.producerName.value, extraction.agencyName.value]
+                  .filter(Boolean)
+                  .join(" · ")}
           </p>
         </div>
-        <span className="badge routine">Awaiting your review</span>
       </div>
-      <div className="review-layout">
-        <main>
-          <section className="card briefing-card section">
-            <ReviewAcceptanceForm
-              reviewId={row.review.id}
-              targetJobId={target?.id}
-              kind={row.review.kind}
-              summary={extraction.summary}
-              assessment={extraction.assessment}
-              recommendations={extraction.recommendations}
-              producerRequests={extraction.producerRequests}
-              requestedDates={extraction.requestedDates}
-              holdRequest={extraction.holdRequest}
-              budgetRange={extraction.budgetRange}
-              fields={fields}
-              candidates={row.review.matchCandidates}
-            />
-          </section>
-        </main>
-        <aside>
-          <section className="card card-pad sticky-card">
-            <p className="eyebrow">Original source · immutable</p>
-            <h2>Source message</h2>
-            <details className="source-document" open={false}>
-              <summary>View original message</summary>
-              <pre className="source-copy">{row.source.content}</pre>
-            </details>
-            <p className="trust-note">
-              The source is preserved. Accepting the briefing records Repd’s
-              interpretation as proposed or unconfirmed information.
-            </p>
-          </section>
+      <div className="compressed-review">
+        <section className="card briefing-card">
+          <ReviewAcceptanceForm
+            reviewId={row.review.id}
+            targetJobId={target?.id}
+            kind={row.review.kind}
+            summary={extraction.summary}
+            assessment={extraction.assessment}
+            recommendations={extraction.recommendations}
+            producerRequests={extraction.producerRequests}
+            operationalObligations={extraction.operationalObligations}
+            requestedDates={extraction.requestedDates}
+            holdRequest={extraction.holdRequest}
+            budgetRange={extraction.budgetRange}
+            fields={fields}
+            candidates={row.review.matchCandidates}
+          />
+        </section>
+        <details className="source-document review-source">
+          <summary>Details & source</summary>
+          <pre className="source-copy">{row.source.content}</pre>
+        </details>
+        <div className="review-reject">
           <form action={rejectReview} className="form-actions">
             <input type="hidden" name="reviewId" value={row.review.id} />
-            <button className="button ghost danger">Reject inquiry</button>
+            <button className="button ghost danger">Dismiss</button>
           </form>
-        </aside>
+        </div>
       </div>
     </div>
   );

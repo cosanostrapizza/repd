@@ -47,6 +47,14 @@ export async function ensureDatabase() {
     throw error;
   }
 }
+export async function closeDatabase() {
+  const client = globalDb.repdPglite;
+  if (!client) return;
+  await client.close();
+  globalDb.repdPglite = undefined;
+  globalDb.repdDatabase = undefined;
+  globalDb.repdMigrated = undefined;
+}
 export function id(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 }

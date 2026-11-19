@@ -8,6 +8,7 @@ import {
   actionEvents,
   actions,
   communications,
+  coordinationDateOptions,
   coordinationObjectives,
   intakeReviews,
   invoiceDrafts,
@@ -16,12 +17,16 @@ import {
   questions,
 } from "@/db/schema";
 import { getAIConfiguration } from "./ai/provider";
+import { inquiryExtractionSchema } from "./ai/schemas";
 import {
   acceptIntakeReview,
   createAndAnalyzeIntake,
   recordAdvanceInquiryDecisions,
+  recordTreatmentCommitmentDecision,
+  retryTreatmentPreparationOperation,
   rewriteCommunication,
 } from "./services/intake";
+import { communicationPreservesTreatmentDecision } from "./communication-constraints";
 import { requireContext } from "./auth";
 
 export type AgentFormState = {
@@ -71,6 +76,65 @@ export async function submitJobResponse(
     targetJobId: jobId,
     kind: "producer_response",
   });
+  const [review] = await db
+    .select()
+    .from(intakeReviews)
+    .where(
+      and(
+        eq(intakeReviews.id, reviewId),
+        eq(intakeReviews.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (review?.status === "ready" && review.proposedData) {
+    const extraction = inquiryExtractionSchema.parse(review.proposedData);
+    const needsDecision = extraction.operationalObligations.some(
+      (item) => item.status === "needs_decision",
+    );
+    const comparable = [
+      [extraction.jobTitle.value, job.title],
+      [extraction.jobType.value, job.jobType],
+      [extraction.location.value, job.location],
+      [extraction.feeCents.value, job.feeCents],
+      [extraction.currency.value, job.currency],
+      [extraction.usageTerms.value, job.usageTerms],
+      [extraction.deliverables.value, job.deliverables],
+      [extraction.paymentTerms.value, job.paymentTerms],
+      [extraction.bookingStatus.value, job.bookingStatus],
+      [extraction.lifecycleStatus.value, job.lifecycleStatus],
+    ];
+    const contradictsKnownFact = comparable.some(
+      ([incoming, existing]) =>
+        incoming != null &&
+        existing != null &&
+        String(incoming).toLocaleLowerCase() !==
+          String(existing).toLocaleLowerCase(),
+    );
+    const classifiedAsRoutineClarification =
+      extraction.risks.length === 0 &&
+      /resolv|clarif|supplied new information/i.test(extraction.assessment);
+    if (
+      !needsDecision &&
+      (!contradictsKnownFact || classifiedAsRoutineClarification)
+    ) {
+      let incorporated = false;
+      try {
+        await acceptIntakeReview({
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userId,
+          reviewId,
+          targetJobId: jobId,
+          corrections: {},
+          rejectedKeys: [],
+        });
+        revalidatePath(`/jobs/${jobId}`);
+        incorporated = true;
+      } catch {
+        // Preserve the review path when automatic incorporation cannot finish.
+      }
+      if (incorporated) redirect(`/jobs/${jobId}?updated=1#coordination`);
+    }
+  }
   redirect(`/inquiries/review/${reviewId}`);
 }
 
@@ -80,6 +144,17 @@ export async function acceptReviewAction(
 ): Promise<AgentFormState> {
   const ctx = await requireContext();
   const reviewId = value(formData, "reviewId");
+  const [review] = await db
+    .select()
+    .from(intakeReviews)
+    .where(
+      and(
+        eq(intakeReviews.id, reviewId),
+        eq(intakeReviews.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!review) return { error: "Review not found." };
   const corrections: Record<string, string> = {};
   const rejectedKeys: string[] = [];
   for (const [key, raw] of formData.entries())
@@ -97,8 +172,6 @@ export async function acceptReviewAction(
       corrections,
       rejectedKeys,
     });
-    revalidatePath("/");
-    revalidatePath("/jobs");
   } catch (error) {
     return {
       error:
@@ -107,7 +180,78 @@ export async function acceptReviewAction(
           : "Could not accept this review.",
     };
   }
-  redirect(`/jobs/${acceptedJobId}`);
+  const [objective] = await db
+    .select()
+    .from(coordinationObjectives)
+    .where(
+      and(
+        eq(coordinationObjectives.jobId, acceptedJobId),
+        eq(coordinationObjectives.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .limit(1);
+  try {
+    const interest = value(formData, "interest");
+    if (
+      review.kind !== "producer_response" &&
+      objective &&
+      ["yes", "maybe", "no"].includes(interest)
+    ) {
+      const options = await db
+        .select()
+        .from(coordinationDateOptions)
+        .where(
+          and(
+            eq(coordinationDateOptions.objectiveId, objective.id),
+            eq(coordinationDateOptions.workspaceId, ctx.workspaceId),
+          ),
+        );
+      const dateDecisions = Object.fromEntries(
+        options.map((option, index) => {
+          const raw = value(formData, `dateDecision_${index}`);
+          return [
+            option.id,
+            ["offer", "defer", "decline"].includes(raw) ? raw : "defer",
+          ];
+        }),
+      ) as Record<string, "offer" | "defer" | "decline">;
+      const categoryConflict = value(formData, "categoryConflict");
+      await recordAdvanceInquiryDecisions({
+        workspaceId: ctx.workspaceId,
+        userId: ctx.userId,
+        objectiveId: objective.id,
+        interest: interest as "yes" | "maybe" | "no",
+        categoryConflict: ["none_known", "possible", "unsure"].includes(
+          categoryConflict,
+        )
+          ? (categoryConflict as "none_known" | "possible" | "unsure")
+          : undefined,
+        dateDecisions,
+      });
+    }
+    const treatmentDecision = value(formData, "treatmentDecision");
+    if (
+      review.kind === "producer_response" &&
+      objective &&
+      ["commit_after_deck", "need_deck_first", "cannot_commit"].includes(
+        treatmentDecision,
+      )
+    )
+      await recordTreatmentCommitmentDecision({
+        workspaceId: ctx.workspaceId,
+        userId: ctx.userId,
+        objectiveId: objective.id,
+        decision: treatmentDecision as
+          "commit_after_deck" | "need_deck_first" | "cannot_commit",
+      });
+  } catch {
+    // The accepted source and recorded decisions remain durable. The objective
+    // carries the recoverable preparation state back into the job workspace.
+  }
+  revalidatePath("/");
+  revalidatePath("/jobs");
+  revalidatePath(`/jobs/${acceptedJobId}`);
+  redirect(`/jobs/${acceptedJobId}#coordination`);
 }
 
 export async function saveInquiryDecisions(
@@ -153,7 +297,88 @@ export async function saveInquiryDecisions(
       configuration: getAIConfiguration(),
     };
   }
-  redirect(`/actions/${actionId}`);
+  const [action] = await db
+    .select({ jobId: actions.jobId })
+    .from(actions)
+    .where(
+      and(eq(actions.id, actionId), eq(actions.workspaceId, ctx.workspaceId)),
+    )
+    .limit(1);
+  redirect(action?.jobId ? `/jobs/${action.jobId}#coordination` : "/actions");
+}
+
+export async function saveTreatmentCommitmentDecision(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
+  const ctx = await requireContext();
+  const objectiveId = value(formData, "objectiveId");
+  const decision = value(formData, "treatmentDecision");
+  if (
+    !["commit_after_deck", "need_deck_first", "cannot_commit"].includes(
+      decision,
+    )
+  )
+    return { error: "Choose how to handle the treatment deadline." };
+  let actionId: string;
+  try {
+    actionId = await recordTreatmentCommitmentDecision({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      objectiveId,
+      decision: decision as
+        "commit_after_deck" | "need_deck_first" | "cannot_commit",
+    });
+    revalidatePath("/");
+    revalidatePath("/jobs");
+  } catch (error) {
+    const [objective] = await db
+      .select({ jobId: coordinationObjectives.jobId })
+      .from(coordinationObjectives)
+      .where(
+        and(
+          eq(coordinationObjectives.id, objectiveId),
+          eq(coordinationObjectives.workspaceId, ctx.workspaceId),
+        ),
+      )
+      .limit(1);
+    revalidatePath("/");
+    if (objective?.jobId) revalidatePath(`/jobs/${objective.jobId}`);
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not prepare the treatment response.",
+      configuration: getAIConfiguration(),
+    };
+  }
+  const [action] = await db
+    .select({ jobId: actions.jobId })
+    .from(actions)
+    .where(
+      and(eq(actions.id, actionId), eq(actions.workspaceId, ctx.workspaceId)),
+    )
+    .limit(1);
+  redirect(action?.jobId ? `/jobs/${action.jobId}#coordination` : "/actions");
+}
+
+export async function retryTreatmentPreparation(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
+  const ctx = await requireContext();
+  const actionId = value(formData, "actionId");
+  const result = await retryTreatmentPreparationOperation({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    actionId,
+  });
+  revalidatePath("/");
+  revalidatePath("/jobs");
+  if (result.jobId) revalidatePath(`/jobs/${result.jobId}`);
+  return result.status === "failed" || result.status === "invalid"
+    ? { error: result.message, configuration: getAIConfiguration() }
+    : { success: result.message };
 }
 
 export async function rejectReview(formData: FormData) {
@@ -202,6 +427,26 @@ export async function saveCommunication(
     body = value(formData, "body"),
     toEmail = value(formData, "toEmail") || null;
   if (!subject || !body) return { error: "Subject and message are required." };
+  const treatmentPayload = (
+    row.action?.payload as {
+      treatmentDecision?:
+        "commit_after_deck" | "need_deck_first" | "cannot_commit";
+      treatmentCondition?: string;
+    } | null
+  );
+  const treatmentDecision = treatmentPayload?.treatmentDecision;
+  if (
+    treatmentDecision &&
+    !communicationPreservesTreatmentDecision(
+      body,
+      treatmentDecision,
+      treatmentPayload?.treatmentCondition,
+    )
+  )
+    return {
+      error:
+        "This edit changes the treatment commitment you selected. Keep the commitment and its deck-review condition explicit.",
+    };
   await db
     .update(communications)
     .set({
@@ -250,6 +495,26 @@ export async function reviseCommunication(
         "warm" | "direct" | "concise",
       instruction: value(formData, "instruction"),
     });
+    const treatmentPayload = (
+      row.action?.payload as {
+        treatmentDecision?:
+          "commit_after_deck" | "need_deck_first" | "cannot_commit";
+        treatmentCondition?: string;
+      } | null
+    );
+    const treatmentDecision = treatmentPayload?.treatmentDecision;
+    if (
+      treatmentDecision &&
+      !communicationPreservesTreatmentDecision(
+        result.body,
+        treatmentDecision,
+        treatmentPayload?.treatmentCondition,
+      )
+    )
+      return {
+        error:
+          "Repd’s revision changed your treatment commitment, so it was not applied.",
+      };
     await db
       .update(communications)
       .set({
@@ -284,11 +549,34 @@ export async function reviseCommunication(
   }
 }
 
-export async function approveCommunication(formData: FormData) {
+export async function approveCommunication(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
   const ctx = await requireContext();
   const communicationId = value(formData, "communicationId");
   const row = await ownedCommunication(ctx.workspaceId, communicationId);
-  if (!row?.action) return;
+  if (!row?.action) return { error: "Draft not found." };
+  const treatmentPayload = (
+    row.action.payload as {
+      treatmentDecision?:
+        "commit_after_deck" | "need_deck_first" | "cannot_commit";
+      treatmentCondition?: string;
+    } | null
+  );
+  const treatmentDecision = treatmentPayload?.treatmentDecision;
+  if (
+    treatmentDecision &&
+    !communicationPreservesTreatmentDecision(
+      row.communication.body,
+      treatmentDecision,
+      treatmentPayload?.treatmentCondition,
+    )
+  )
+    return {
+      error:
+        "This draft no longer matches your treatment decision. Restore the exact commitment before approval.",
+    };
   await db
     .update(communications)
     .set({ status: "approved", approvedAt: new Date(), updatedAt: new Date() })
@@ -318,6 +606,8 @@ export async function approveCommunication(formData: FormData) {
     metadata: { communicationId, revision: row.communication.revision },
   });
   revalidatePath(`/actions/${row.action.id}`);
+  revalidatePath(`/jobs/${row.communication.jobId}`);
+  return { success: "Draft approved. It has not been sent." };
 }
 
 export async function recordCommunicationHandoff(formData: FormData) {
@@ -440,6 +730,12 @@ export async function prepareInvoice(formData: FormData) {
     )
     .limit(1);
   if (!row || row.action.kind !== "invoice") return;
+  if (
+    !row.job.feeCents ||
+    !row.job.paymentTerms ||
+    !row.job.clientOrganizationId
+  )
+    return;
   const [existing] = await db
     .select()
     .from(invoiceDrafts)
@@ -463,23 +759,26 @@ export async function prepareInvoice(formData: FormData) {
           )
           .limit(1)
       : [];
-    await db.insert(invoiceDrafts).values({
-      id: id("invoice"),
-      workspaceId: ctx.workspaceId,
-      jobId: row.job.id,
-      actionId,
-      status: "ready",
-      lineItems: row.job.feeCents
-        ? [
-            {
-              description: `Creative fee — ${row.job.title}`,
-              amountCents: row.job.feeCents,
-            },
-          ]
-        : [],
-      billingName: client?.name ?? null,
-      paymentTerms: row.job.paymentTerms,
-    });
+    await db
+      .insert(invoiceDrafts)
+      .values({
+        id: id("invoice"),
+        workspaceId: ctx.workspaceId,
+        jobId: row.job.id,
+        actionId,
+        status: "ready",
+        lineItems: row.job.feeCents
+          ? [
+              {
+                description: `Creative fee — ${row.job.title}`,
+                amountCents: row.job.feeCents,
+              },
+            ]
+          : [],
+        billingName: client?.name ?? null,
+        paymentTerms: row.job.paymentTerms,
+      })
+      .onConflictDoNothing({ target: invoiceDrafts.actionId });
   }
   await db
     .update(jobs)
@@ -488,10 +787,12 @@ export async function prepareInvoice(formData: FormData) {
   await db
     .update(actions)
     .set({
-      status: "resolved",
-      resolutionReason: "completed_by_user",
-      resolvedAt: new Date(),
-      executionStatus: "not_requested",
+      title: "Invoice ready for review",
+      status: "pending_approval",
+      resolutionReason: null,
+      resolvedAt: null,
+      executionStatus: "succeeded",
+      requiresApproval: true,
       updatedAt: new Date(),
     })
     .where(eq(actions.id, actionId));
@@ -501,8 +802,8 @@ export async function prepareInvoice(formData: FormData) {
     actionId,
     type: "invoice_prepared",
     fromStatus: row.action.status,
-    toStatus: "resolved",
-    reason: "completed_by_user",
+    toStatus: "pending_approval",
+    reason: "source_backed_fields_complete",
     metadata: { externalDelivery: false },
   });
   revalidatePath(`/actions/${actionId}`);

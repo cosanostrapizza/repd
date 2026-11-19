@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { addDays, setHours, startOfDay } from "date-fns";
 import { eq } from "drizzle-orm";
-import { db, ensureDatabase } from "./client";
+import { closeDatabase, db, ensureDatabase } from "./client";
 import {
   actions,
   activities,
@@ -376,9 +376,15 @@ async function main() {
   await reevaluateWorkspace(ws);
   console.log("Seeded demo login: alex@repd.demo / creativelife");
 }
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
+async function run() {
+  try {
+    await main();
+  } catch (error) {
     console.error(error);
-    process.exit(1);
-  });
+    process.exitCode = 1;
+  } finally {
+    await closeDatabase();
+  }
+}
+
+void run();

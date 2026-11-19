@@ -141,6 +141,7 @@ export const jobs = pgTable(
       .default("unbooked"),
     shootStart: timestamp("shoot_start", { withTimezone: true }),
     shootEnd: timestamp("shoot_end", { withTimezone: true }),
+    shootDate: date("shoot_date"),
     location: text("location"),
     feeCents: integer("fee_cents"),
     proposedBudgetMinCents: integer("proposed_budget_min_cents"),
@@ -201,6 +202,7 @@ export const actions = pgTable(
     id: text("id").primaryKey(),
     workspaceId: text("workspace_id").notNull(),
     jobId: text("job_id").references(() => jobs.id, { onDelete: "cascade" }),
+    objectiveId: text("objective_id"),
     personId: text("person_id").references(() => people.id, {
       onDelete: "set null",
     }),
@@ -327,7 +329,7 @@ export const coordinationObjectives = pgTable(
     sourceId: text("source_id").references(() => sources.id, {
       onDelete: "set null",
     }),
-    kind: text("kind", { enum: ["advance_inquiry"] }).notNull(),
+    kind: text("kind").notNull(),
     title: text("title").notNull(),
     outcome: text("outcome").notNull(),
     summary: text("summary").notNull(),
@@ -422,6 +424,8 @@ export const coordinationDateOptions = pgTable(
     label: text("label").notNull(),
     startsAt: timestamp("starts_at", { withTimezone: true }),
     endsAt: timestamp("ends_at", { withTimezone: true }),
+    startsOn: date("starts_on"),
+    endsOn: date("ends_on"),
     relationship: text("relationship", {
       enum: ["single", "alternative", "range"],
     }).notNull(),
@@ -431,10 +435,15 @@ export const coordinationDateOptions = pgTable(
       enum: ["first", "second", "unspecified"],
     }),
     holdState: text("hold_state", {
-      enum: ["not_requested", "requested", "granted", "declined"],
+      enum: ["not_requested", "requested", "granted", "declined", "released"],
     })
       .notNull()
       .default("not_requested"),
+    clientSelected: boolean("client_selected").notNull().default(false),
+    clientSelectionSourceId: text("client_selection_source_id").references(
+      () => sources.id,
+      { onDelete: "set null" },
+    ),
     decision: text("decision", {
       enum: ["offer", "defer", "decline"],
     }),
@@ -602,27 +611,131 @@ export const aiRuns = pgTable("ai_runs", {
     .defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });
-export const invoiceDrafts = pgTable("invoice_drafts", {
+export const invoiceDrafts = pgTable(
+  "invoice_drafts",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    actionId: text("action_id").references(() => actions.id, {
+      onDelete: "set null",
+    }),
+    status: text("status", { enum: ["draft", "ready", "approved"] })
+      .notNull()
+      .default("draft"),
+    lineItems: jsonb("line_items")
+      .$type<Array<{ description: string; amountCents: number }>>()
+      .notNull()
+      .default([]),
+    billingName: text("billing_name"),
+    billingEmail: text("billing_email"),
+    paymentTerms: text("payment_terms"),
+    notes: text("notes"),
+    ...audit,
+  },
+  (t) => [uniqueIndex("invoice_drafts_action_unique").on(t.actionId)],
+);
+
+export const agentThreads = pgTable("agent_threads", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  status: text("status", { enum: ["active", "archived"] })
+    .notNull()
+    .default("active"),
+  ...audit,
+});
+
+export const agentMessages = pgTable("agent_messages", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),
-  jobId: text("job_id")
+  threadId: text("thread_id")
     .notNull()
-    .references(() => jobs.id, { onDelete: "cascade" }),
+    .references(() => agentThreads.id, { onDelete: "cascade" }),
+  jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  role: text("role", { enum: ["user", "assistant"] }).notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata").$type<{
+    actionId?: string;
+    communicationId?: string;
+    links?: Array<{ href: string; label: string }>;
+    clarification?: boolean;
+  }>(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const agentRuns = pgTable("agent_runs", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  threadId: text("thread_id")
+    .notNull()
+    .references(() => agentThreads.id, { onDelete: "cascade" }),
+  userMessageId: text("user_message_id").references(() => agentMessages.id, {
+    onDelete: "set null",
+  }),
+  jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
   actionId: text("action_id").references(() => actions.id, {
     onDelete: "set null",
   }),
-  status: text("status", { enum: ["draft", "ready", "approved"] })
+  communicationId: text("communication_id").references(
+    () => communications.id,
+    { onDelete: "set null" },
+  ),
+  status: text("status", {
+    enum: ["running", "waiting_for_user", "completed", "failed"],
+  })
     .notNull()
-    .default("draft"),
-  lineItems: jsonb("line_items")
-    .$type<Array<{ description: string; amountCents: number }>>()
+    .default("running"),
+  summary: text("summary"),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", { withTimezone: true })
     .notNull()
-    .default([]),
-  billingName: text("billing_name"),
-  billingEmail: text("billing_email"),
-  paymentTerms: text("payment_terms"),
-  notes: text("notes"),
-  ...audit,
+    .defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+export const agentRunEvents = pgTable("agent_run_events", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  type: text("type", {
+    enum: [
+      "search",
+      "check",
+      "record_change",
+      "artifact_preparation",
+      "approval_required",
+      "clarification_required",
+      "failure",
+      "completed",
+    ],
+  }).notNull(),
+  status: text("status", { enum: ["started", "completed", "failed"] })
+    .notNull()
+    .default("completed"),
+  label: text("label").notNull(),
+  detail: text("detail"),
+  jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  actionId: text("action_id").references(() => actions.id, {
+    onDelete: "set null",
+  }),
+  communicationId: text("communication_id").references(
+    () => communications.id,
+    { onDelete: "set null" },
+  ),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export type Job = typeof jobs.$inferSelect;
@@ -637,3 +750,7 @@ export type CoordinationDependency =
   typeof coordinationDependencies.$inferSelect;
 export type CoordinationDateOption =
   typeof coordinationDateOptions.$inferSelect;
+export type AgentThread = typeof agentThreads.$inferSelect;
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type AgentRun = typeof agentRuns.$inferSelect;
+export type AgentRunEvent = typeof agentRunEvents.$inferSelect;

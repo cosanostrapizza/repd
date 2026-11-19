@@ -2,6 +2,8 @@ import { Bell } from "lucide-react";
 import { AppNav, MobileNav } from "@/components/app-nav";
 import { requireContext } from "@/lib/auth";
 import { logout } from "@/lib/server-actions";
+import { AgentPanel } from "@/components/agent/agent-panel";
+import { getAgentConversation } from "@/lib/agent-workspace";
 export const dynamic = "force-dynamic";
 export default async function WorkspaceLayout({
   children,
@@ -9,6 +11,7 @@ export default async function WorkspaceLayout({
   children: React.ReactNode;
 }) {
   const ctx = await requireContext();
+  const conversation = await getAgentConversation(ctx.workspaceId);
   const initials = ctx.user.name
     .split(" ")
     .map((x) => x[0])
@@ -49,6 +52,14 @@ export default async function WorkspaceLayout({
         {children}
       </main>
       <MobileNav />
+      <AgentPanel
+        initialThreadId={conversation.thread?.id ?? undefined}
+        initialMessages={conversation.messages.slice(-8).map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+        }))}
+      />
     </div>
   );
 }

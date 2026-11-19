@@ -138,6 +138,14 @@ export function ReviewAcceptanceForm({
   assessment: string;
   recommendations: string[];
   producerRequests: string[];
+  operationalObligations: Array<{
+    key: string;
+    label: string;
+    owner: "repd" | "creative" | "external";
+    status: "promised" | "needs_decision" | "informational";
+    dueDate: string | null;
+    prerequisite: string | null;
+  }>;
   requestedDates: Array<{
     label: string;
     relationship: "single" | "alternative" | "range";
@@ -174,20 +182,25 @@ export function ReviewAcceptanceForm({
           maximumFractionDigits: 0,
         }).format(field.value / 100)
       : String(field.value);
+  const asksCategoryConflict = producerRequests.some((request) =>
+    /conflict|exclusiv|categor/i.test(request),
+  );
   return (
     <form action={action} className="briefing-review-form">
       <input type="hidden" name="reviewId" value={reviewId} />
       {targetJobId && (
         <input type="hidden" name="targetJobId" value={targetJobId} />
       )}
-      <section className="briefing-block understanding-block">
-        <p className="eyebrow">Repd’s understanding</p>
+      <section className="briefing-block understanding-block compact-summary">
+        <p className="eyebrow">
+          {kind === "producer_response" ? "What changed" : "At a glance"}
+        </p>
         <p className="briefing-summary">{summary}</p>
       </section>
       {kind === "producer_response" && (
         <section className="briefing-block">
-          <p className="eyebrow">Before → after</p>
-          <div className="opportunity-list">
+          <p className="eyebrow">Updated</p>
+          <div className="change-list">
             {fields
               .filter(
                 (field) =>
@@ -197,15 +210,15 @@ export function ReviewAcceptanceForm({
               )
               .map((field) => (
                 <div key={field.key}>
-                  <span>{field.label}</span>
-                  <small>
-                    {field.existing == null
-                      ? "Not known"
-                      : String(field.existing)}
-                  </small>
-                  <strong>→ {formatFact(field)}</strong>
+                  <strong>{field.label}</strong>
+                  <span>{formatFact(field)}</span>
                 </div>
               ))}
+            {producerRequests.map((request) => (
+              <div key={request}>
+                <span>{request}</span>
+              </div>
+            ))}
           </div>
         </section>
       )}
@@ -216,7 +229,7 @@ export function ReviewAcceptanceForm({
             : "The opportunity"}
         </p>
         <div className="opportunity-list">
-          {requestedDates.length > 0 && (
+          {requestedDates.length > 0 && kind !== "producer_response" && (
             <div>
               <span>Dates</span>
               <strong>
@@ -281,39 +294,99 @@ export function ReviewAcceptanceForm({
           )}
         </div>
       </section>
-      {producerRequests.length > 0 && kind === "producer_response" && (
-        <section className="briefing-block">
-          <p className="eyebrow">What the producer said</p>
-          <ul className="plain-list">
-            {producerRequests.map((request) => (
-              <li key={request}>{request}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <section className="briefing-block assessment-block">
-        <p className="eyebrow">Repd’s assessment</p>
-        <p>{assessment}</p>
-      </section>
-      <section className="briefing-block">
-        <p className="eyebrow">Recommended next move</p>
-        <ol className="recommendation-list">
-          {recommendations.map((recommendation) => (
-            <li key={recommendation}>{recommendation}</li>
-          ))}
-        </ol>
-      </section>
       {kind !== "producer_response" && (
-        <section className="briefing-block assessment-block">
-          <p className="eyebrow">Communication comes after your decisions</p>
-          <p>
-            Repd will check its records first, ask for your interest and hold
-            choices, then prepare a response that reflects those decisions.
-          </p>
+        <section className="briefing-block inline-decisions">
+          <fieldset className="decision-fieldset">
+            <legend>Interested?</legend>
+            <div className="segmented-decisions">
+              <label>
+                <input type="radio" name="interest" value="yes" required />
+                <span>Yes</span>
+              </label>
+              <label>
+                <input type="radio" name="interest" value="maybe" required />
+                <span>Depends on terms</span>
+              </label>
+              <label>
+                <input type="radio" name="interest" value="no" required />
+                <span>Pass</span>
+              </label>
+            </div>
+          </fieldset>
+          {requestedDates.length > 0 && (
+            <fieldset className="decision-fieldset">
+              <legend>Which dates can we hold?</legend>
+              {requestedDates.map((date, index) => (
+                <div className="date-decision" key={date.label}>
+                  <div>
+                    <strong>{date.label}</strong>
+                    <small>
+                      {holdRequest.requested
+                        ? `${holdRequest.kind ?? "Requested"} hold requested · not granted`
+                        : "No hold requested"}
+                    </small>
+                  </div>
+                  <select
+                    aria-label={`Decision for ${date.label}`}
+                    name={`dateDecision_${index}`}
+                    defaultValue="defer"
+                  >
+                    {holdRequest.requested && (
+                      <option value="offer">Offer requested hold</option>
+                    )}
+                    <option value="defer">Do not commit yet</option>
+                    <option value="decline">Decline date</option>
+                  </select>
+                </div>
+              ))}
+            </fieldset>
+          )}
+          {asksCategoryConflict && (
+            <fieldset className="decision-fieldset">
+              <legend>Category conflict?</legend>
+              <p>
+                Repd found no recorded conflict. Contracts are not connected.
+              </p>
+              <div className="segmented-decisions">
+                <label>
+                  <input
+                    type="radio"
+                    name="categoryConflict"
+                    value="none_known"
+                    required
+                  />
+                  <span>None known</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="categoryConflict"
+                    value="possible"
+                    required
+                  />
+                  <span>Possible</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="categoryConflict"
+                    value="unsure"
+                    required
+                  />
+                  <span>Not sure</span>
+                </label>
+              </div>
+            </fieldset>
+          )}
         </section>
       )}
       <details className="briefing-block correction-panel">
-        <summary>Edit details and inspect evidence</summary>
+        <summary>Details, reasoning & evidence</summary>
+        <div className="assessment compact-assessment">
+          <strong>Assessment</strong>
+          <p>{assessment}</p>
+          {recommendations.length > 0 && <p>{recommendations.join(" ")}</p>}
+        </div>
         <p className="trust-note">
           Corrections change Repd’s interpretation. They do not confirm a
           business term.
@@ -394,10 +467,10 @@ export function ReviewAcceptanceForm({
       <div className="form-actions briefing-primary-actions">
         <SubmitButton>
           {kind === "producer_response"
-            ? "Accept coherent update"
+            ? "Update job"
             : targetJobId
-              ? "Update job & review next steps"
-              : "Create job & review next steps"}
+              ? "Update job & prepare reply"
+              : "Continue to reply"}
         </SubmitButton>
       </div>
     </form>

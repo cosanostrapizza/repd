@@ -1,6 +1,7 @@
 node_modules
 .next
 .repd
+.DS_Store
 coverage
 playwright-report
 test-results

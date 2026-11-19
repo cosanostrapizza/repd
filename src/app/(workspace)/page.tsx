@@ -1,220 +1,157 @@
 import Link from "next/link";
-import { and, desc, eq, ne } from "drizzle-orm";
-import { ArrowRight, BriefcaseBusiness, Plus } from "lucide-react";
-import { ActionList } from "@/components/action-list";
-import { db } from "@/db/client";
-import { actions, activities, jobs, questions } from "@/db/schema";
+import {
+  AlertTriangle,
+  ArrowRight,
+  BriefcaseBusiness,
+  CheckCircle2,
+  Clock3,
+  Plus,
+  Sparkles,
+} from "lucide-react";
+import { RetryPreparationForm } from "@/components/agent/retry-preparation-form";
 import { reevaluateWorkspace } from "@/lib/action-engine";
 import { requireContext } from "@/lib/auth";
-import { bookingLabels, nextNeed } from "@/lib/domain";
+import {
+  getWorkspaceTodayState,
+  type WorkspaceWorkItem,
+} from "@/lib/workspace-state";
 
-function groundedSentence(
-  action: typeof actions.$inferSelect,
-  jobTitle: string | null,
-) {
-  const subject = jobTitle ?? "A workspace item";
-  if (action.kind === "producer_coordination")
-    return `${subject} still needs information, and I’ve prepared a producer note for your review.`;
-  if (action.kind === "hold_conflict")
-    return `${subject} overlaps another active hold, so a scheduling decision is waiting.`;
-  if (action.kind === "invoice")
-    return `${subject} is complete, and its invoice is ready for preparation.`;
-  return `${subject} needs attention: ${action.explanation}`;
+function actionLabel(item: WorkspaceWorkItem) {
+  if (item.action?.executionStatus === "failed") return "Retry preparation";
+  if (item.action?.status === "pending_approval")
+    return item.kind === "invoice" ? "Review invoice" : "Review reply";
+  if (item.kind === "treatment_commitment") return "Decide treatment";
+  if (item.kind === "producer_coordination") return "Review reply";
+  return "Review next step";
 }
 
-export default async function HomePage() {
+export default async function TodayPage() {
   const ctx = await requireContext();
   await reevaluateWorkspace(ctx.workspaceId);
-  const [actionRows, activeJobs, recent, waiting] = await Promise.all([
-    db
-      .select({ action: actions, jobTitle: jobs.title })
-      .from(actions)
-      .leftJoin(jobs, eq(actions.jobId, jobs.id))
-      .where(
-        and(
-          eq(actions.workspaceId, ctx.workspaceId),
-          ne(actions.status, "resolved"),
-        ),
-      )
-      .orderBy(actions.priority, actions.createdAt)
-      .limit(6),
-    db
-      .select()
-      .from(jobs)
-      .where(
-        and(
-          eq(jobs.workspaceId, ctx.workspaceId),
-          ne(jobs.lifecycleStatus, "cancelled"),
-        ),
-      )
-      .orderBy(desc(jobs.updatedAt)),
-    db
-      .select({ activity: activities, jobTitle: jobs.title })
-      .from(activities)
-      .leftJoin(jobs, eq(activities.jobId, jobs.id))
-      .where(eq(activities.workspaceId, ctx.workspaceId))
-      .orderBy(desc(activities.createdAt))
-      .limit(5),
-    db
-      .select({ question: questions, jobTitle: jobs.title })
-      .from(questions)
-      .innerJoin(jobs, eq(questions.jobId, jobs.id))
-      .where(
-        and(
-          eq(questions.workspaceId, ctx.workspaceId),
-          eq(questions.status, "asked"),
-          eq(jobs.workspaceId, ctx.workspaceId),
-        ),
-      )
-      .orderBy(desc(questions.askedAt))
-      .limit(4),
-  ]);
+  const today = await getWorkspaceTodayState(ctx.workspaceId);
   const first = ctx.user.name.split(" ")[0];
-  const lead = actionRows
-    .slice(0, 2)
-    .map(({ action, jobTitle }) => groundedSentence(action, jobTitle))
-    .join(" ");
+  const backgroundCount = today.repdHandling.length + today.waiting.length;
+  const lead = today.attention.length
+    ? `${today.attention.length === 1 ? "One thing needs" : `${today.attention.length} things need`} you today.${backgroundCount ? ` Repd is keeping track of ${backgroundCount} other ${backgroundCount === 1 ? "item" : "items"}.` : ""}`
+    : today.jobs.length
+      ? `Nothing needs your attention right now.${backgroundCount ? ` Repd is keeping track of ${backgroundCount} ${backgroundCount === 1 ? "item" : "items"} in the background.` : ""}`
+      : "There is no active work yet. Add an inquiry and Repd will build the business brief.";
+
   return (
-    <div className="content">
+    <div className="content today-page">
       <section className="daily-briefing">
         <div>
-          <p className="eyebrow">Today’s briefing</p>
+          <p className="eyebrow">Today</p>
           <h1>
-            Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {first}
-            .
+            Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {first}.
           </h1>
-          <p>
-            {lead ||
-              (activeJobs.length
-                ? "No prepared decision is waiting right now. I’m monitoring the active briefs and will surface a concrete next move when stored facts change."
-                : "There is no active work yet. Add an inquiry and I’ll turn the source into a decision-ready brief.")}
-          </p>
+          <p>{lead}</p>
         </div>
         <Link href="/inquiries/new" className="button accent">
           <Plus size={17} /> Add inquiry
         </Link>
       </section>
-      <div className="briefing-layout">
-        <main>
-          <section className="section">
-            <div className="section-title">
+
+      <main className="today-stack">
+        <section className="attention-section" aria-labelledby="attention-title">
+          <div className="compact-section-head">
+            <div>
+              <p className="eyebrow">Needs you</p>
+              <h2 id="attention-title">Your decisions and reviews</h2>
+            </div>
+            <Link href="/actions" className="quiet-link">
+              View history <ArrowRight size={14} />
+            </Link>
+          </div>
+          {today.attention.length ? (
+            <div className="attention-list">
+              {today.attention.slice(0, 5).map((item) => (
+                <article className="attention-item" key={`${item.source}:${item.id}`}>
+                  <div className={`attention-icon ${item.state}`}>
+                    {item.state === "preparation_failed" ? (
+                      <AlertTriangle size={17} />
+                    ) : (
+                      <Sparkles size={17} />
+                    )}
+                  </div>
+                  <div className="attention-copy">
+                    <span>{item.jobTitle}</span>
+                    <h3>{item.title}</h3>
+                    <p>{item.detail}</p>
+                  </div>
+                  {item.action?.executionStatus === "failed" ? (
+                    <RetryPreparationForm actionId={item.action.id} compact />
+                  ) : (
+                    <Link className="button secondary small" href={item.href}>
+                      {actionLabel(item)}
+                    </Link>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="attention-clear">
+              <CheckCircle2 size={22} />
               <div>
-                <p className="eyebrow">Prepared for you</p>
-                <h2>Decisions and work to review</h2>
+                <strong>You’re caught up.</strong>
+                <p>Repd will bring decisions and approvals here when they need you.</p>
               </div>
-              <Link href="/actions" className="button ghost">
-                Full inbox <ArrowRight size={16} />
-              </Link>
             </div>
-            <div className="card">
-              <ActionList
-                rows={actionRows.map((row) => ({
-                  ...row.action,
-                  jobTitle: row.jobTitle,
-                }))}
-              />
-            </div>
-          </section>
-          <section className="section card card-pad">
-            <div className="section-title">
+          )}
+        </section>
+
+        {(today.repdHandling.length > 0 || today.waiting.length > 0) && (
+          <section className="background-section" aria-labelledby="background-title">
+            <div className="compact-section-head">
               <div>
-                <p className="eyebrow">What changed</p>
-                <h2>Recent activity</h2>
+                <p className="eyebrow">Background work</p>
+                <h2 id="background-title">Repd is keeping things moving</h2>
               </div>
             </div>
-            {recent.map(({ activity, jobTitle }) => (
-              <div className="activity change-row" key={activity.id}>
-                <span>
-                  {activity.createdAt.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </span>
-                <div>
-                  <strong>{activity.summary}</strong>
-                  {jobTitle && <p>{jobTitle}</p>}
-                </div>
-              </div>
-            ))}
-            {!recent.length && (
-              <p className="muted">
-                No material changes have been recorded yet.
-              </p>
-            )}
-          </section>
-        </main>
-        <aside>
-          {waiting.length > 0 && (
-            <section className="section">
-              <div className="section-title">
-                <div>
-                  <p className="eyebrow">Waiting on</p>
-                  <h2>Producer replies</h2>
-                </div>
-              </div>
-              <div className="card">
-                {waiting.map(({ question, jobTitle }) => (
-                  <Link
-                    href={`/jobs/${question.jobId}`}
-                    className="radar-job"
-                    key={question.id}
-                  >
-                    <div>
-                      <h3>{jobTitle}</h3>
-                      <p>{question.question}</p>
-                    </div>
-                    <span>Asked →</span>
+            <div className="background-columns">
+              {today.repdHandling.length > 0 && <div>
+                <h3><Sparkles size={15} /> Repd is handling</h3>
+                {today.repdHandling.map((item) => (
+                  <Link href={item.href} className="background-row" key={item.id}>
+                    <span>{item.jobTitle}</span><strong>{item.title}</strong>
                   </Link>
                 ))}
-              </div>
-            </section>
-          )}
-          <section className="section">
-            <div className="section-title">
-              <div>
-                <p className="eyebrow">Active work</p>
-                <h2>On Repd’s radar</h2>
-              </div>
-              <Link href="/jobs" className="button ghost">
-                All jobs
-              </Link>
-            </div>
-            <div className="card">
-              {activeJobs.slice(0, 6).map((job) => (
-                <Link
-                  href={`/jobs/${job.id}`}
-                  key={job.id}
-                  className="radar-job"
-                >
-                  <div>
-                    <h3>{job.title}</h3>
-                    <p>{bookingLabels[job.bookingStatus]}</p>
-                  </div>
-                  <span>{nextNeed(job)} →</span>
-                </Link>
-              ))}
-              {!activeJobs.length && (
-                <div className="empty">
-                  <BriefcaseBusiness />
-                  <h3>No active work yet</h3>
-                  <p>Paste a producer inquiry to let Repd build the brief.</p>
-                  <Link className="button" href="/inquiries/new">
-                    Add inquiry
+              </div>}
+              {today.waiting.length > 0 && <div>
+                <h3><Clock3 size={15} /> Waiting on others</h3>
+                {today.waiting.map((item) => (
+                  <Link href={item.href} className="background-row" key={item.id}>
+                    <span>{item.jobTitle}</span><strong>{item.title}</strong>
                   </Link>
-                </div>
-              )}
+                ))}
+              </div>}
             </div>
           </section>
-          <section className="card card-pad manager-note">
-            <p className="eyebrow">How Repd is working</p>
-            <p>
-              I prepare work from stored facts and sources. You approve
-              consequential changes and outbound communication. Approval never
-              implies delivery.
-            </p>
-          </section>
-        </aside>
-      </div>
+        )}
+
+        <details className="recent-summary">
+          <summary>
+            <span><CheckCircle2 size={16} /> Recent changes</span>
+            <small>{today.recent.length ? `${today.recent.length} updates` : "No updates"}</small>
+          </summary>
+          <div className="recent-list">
+            {today.recent.map(({ activity, jobTitle }) => (
+              <div className="recent-row" key={activity.id}>
+                <span>{activity.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                <div><strong>{activity.summary}</strong><small>{jobTitle}</small></div>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        {!today.jobs.length && (
+          <div className="empty card">
+            <BriefcaseBusiness />
+            <h3>No active work yet</h3>
+            <p>Paste a producer inquiry to let Repd build the brief.</p>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

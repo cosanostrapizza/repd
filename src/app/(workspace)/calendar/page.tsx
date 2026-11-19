@@ -22,6 +22,13 @@ const timeLabel = (date: Date) =>
   date.getHours() === 0 && date.getMinutes() === 0
     ? "All day"
     : format(date, "h:mm a");
+const conflictIncludesHold = (
+  action: typeof actions.$inferSelect,
+  holdId: string,
+) => {
+  const payload = action.payload as { holdIds?: string[] };
+  return payload.holdIds?.includes(holdId) ?? false;
+};
 export default async function CalendarPage({
   searchParams,
 }: {
@@ -135,7 +142,9 @@ export default async function CalendarPage({
                 {events.map(({ hold, job }) => {
                   const action = conflictActions.find(
                     (item) =>
-                      item.jobId === job.id && item.status !== "resolved",
+                      item.status !== "resolved" &&
+                      (conflictIncludesHold(item, hold.id) ||
+                        item.jobId === job.id),
                   );
                   return (
                     <Link
@@ -174,7 +183,9 @@ export default async function CalendarPage({
           .sort((a, b) => a.hold.startsAt.getTime() - b.hold.startsAt.getTime())
           .map(({ hold, job }) => {
             const conflictAction = conflictActions.find(
-              (item) => item.jobId === job.id && item.status !== "resolved",
+              (item) =>
+                item.status !== "resolved" &&
+                (conflictIncludesHold(item, hold.id) || item.jobId === job.id),
             );
             return (
               <div className="action-card" key={hold.id}>
@@ -203,7 +214,11 @@ export default async function CalendarPage({
                   {conflicting.has(hold.id) && (
                     <Link
                       className="button secondary small"
-                      href={`/actions/${conflictAction?.id}`}
+                      href={
+                        conflictAction
+                          ? `/actions/${conflictAction.id}`
+                          : `/jobs/${job.id}`
+                      }
                     >
                       Review conflict
                     </Link>
