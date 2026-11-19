@@ -177,3 +177,38 @@ claim a mutation or external execution unless the command and event succeeded.
 This document is the intended contract. `PROJECT_STATE.md` is authoritative for
 what is implemented. `IMPLEMENTATION.md` records sequencing and acceptance
 coverage. Where they differ, the project-state limitation describes reality.
+
+## 9. Composable tool execution
+
+Ask Repd now uses a bounded, one-tool-at-a-time orchestration loop. The model
+selects one authorized tool, its Zod input is validated, the operation runs,
+and the structured observation is returned before the next selection. The
+default ceiling is eight steps and 80,000 serialized context characters
+(`AGENT_MAX_STEPS` and `AGENT_MAX_CONTEXT_CHARS`, both hard-capped). Completed
+commands and run events are durable; hidden reasoning is neither stored nor
+shown.
+
+The registry exposes these deliberately small primitives:
+
+| Tool                             | Risk                 | Authority                                     |
+| -------------------------------- | -------------------- | --------------------------------------------- |
+| `search_business_records`        | read                 | Jobs, clients, and job participants           |
+| `read_job_state`                 | read                 | Canonical Job Workspace projection            |
+| `read_workspace_attention`       | read                 | Canonical Today projection                    |
+| `inspect_job_evidence`           | read                 | Job fields, sources, and communications       |
+| `inspect_agent_history`          | read                 | Durable messages in the current thread        |
+| `record_treatment_commitment`    | prepare for approval | Existing treatment command and semantic guard |
+| `prepare_producer_communication` | prepare for approval | Idempotent action and draft command           |
+| `create_conditional_follow_up`   | internal write       | Canonical deferred action                     |
+| `prepare_ready_invoices`         | prepare for approval | Source-backed invoice draft command           |
+
+Every tool is workspace-scoped. Write tools authorize referenced jobs and
+participants, use stable deduplication keys, and emit action or agent-run
+events. There is no SQL tool and no general record-mutation tool.
+
+Conditional follow-ups are deferred actions, not a reminder subsystem. On
+workspace reevaluation, a due follow-up checks the linked communication. If it
+was never confirmed sent, the action asks the user to complete handoff rather
+than claiming a late reply. If it was sent, Repd looks only for a later incoming
+source recorded in Repd; it never claims to inspect an inbox. The action is
+resolved when such a source exists and otherwise becomes current attention.

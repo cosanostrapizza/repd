@@ -129,3 +129,24 @@ agent, failure recovery, and communication approval.
 - `docs/agent-native-architecture.md`: UX/domain/agent architecture
 - `IMPLEMENTATION.md`: implementation decisions and acceptance gate
 - `PROJECT_STATE.md`: implemented reality, limitations, next priorities
+
+## Composable agent milestone — 2026-11-18
+
+- Added a typed registry of nine domain tools over canonical projections and
+  authoritative commands. Tools carry read, internal-write, or
+  prepare-for-approval classifications and validate model inputs with Zod.
+- Replaced the hardcoded conversational intent branches with a model-directed,
+  one-tool-per-observation loop bounded by step and serialized-context limits.
+- Added idempotent producer-draft, conditional-follow-up, and batch invoice
+  preparation commands. Consequential artifacts remain unapproved and unsent.
+- Conditional text is required verbatim in prepared producer messages. The
+  existing treatment command retains its stronger domain-specific semantic
+  validation.
+- Follow-ups reuse actions, surface after their deadline during normal
+  workspace reevaluation, survive restarts, and distinguish unsent handoff
+  from a sent message awaiting a recorded reply.
+- Added planner-contract unit coverage and a desktop/mobile browser acceptance
+  scenario for search → evidence check → draft → Friday follow-up.
+
+No schema change was needed: actions, communications, invoice drafts, agent
+runs, and run events already represent the required durable state.

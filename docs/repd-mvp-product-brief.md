@@ -68,17 +68,17 @@ truth.
 
 ## Automation and authorization
 
-| Operation | Default authority |
-| --- | --- |
-| Read/search workspace records | Automatic |
-| Extract and reconcile non-conflicting source facts | Automatic, with provenance |
-| Link people, organizations, sources, and answered questions | Automatic |
-| Prepare drafts, follow-ups, and internal recommendations | Automatic |
-| Record an explicit user decision | Authorized by that instruction |
-| Grant/release a hold | Explicit user authorization required |
-| Approve or send external communication | Separate explicit approval/execution |
-| Issue an invoice | Explicit approval required |
-| Confirm delivery, booking, or payment | Provider evidence or explicit user record |
+| Operation                                                   | Default authority                         |
+| ----------------------------------------------------------- | ----------------------------------------- |
+| Read/search workspace records                               | Automatic                                 |
+| Extract and reconcile non-conflicting source facts          | Automatic, with provenance                |
+| Link people, organizations, sources, and answered questions | Automatic                                 |
+| Prepare drafts, follow-ups, and internal recommendations    | Automatic                                 |
+| Record an explicit user decision                            | Authorized by that instruction            |
+| Grant/release a hold                                        | Explicit user authorization required      |
+| Approve or send external communication                      | Separate explicit approval/execution      |
+| Issue an invoice                                            | Explicit approval required                |
+| Confirm delivery, booking, or payment                       | Provider evidence or explicit user record |
 
 Copying or opening a draft is not delivery. A client-selected date is not a
 confirmed booking. A conditional commitment must remain conditional.
@@ -102,3 +102,17 @@ confirmed booking. A conditional commitment must remain conditional.
 The detailed interaction and technical contracts live in
 `docs/agent-native-architecture.md`. Shipped reality and limitations live in
 `PROJECT_STATE.md`.
+
+## Composable conversational work
+
+The universal agent can compose grounded searches, canonical job or Today
+reads, evidence inspection, approval-gated producer drafts, dated internal
+follow-ups, treatment decisions, and invoice preparation within one bounded
+request. A conditional commercial statement is copied into the draft and
+validated before persistence. A draft never counts as contact, and a follow-up
+linked to an unsent draft remains a handoff reminder rather than an alleged
+external wait.
+
+Arbitrary commercial-field mutation, external delivery, invoice issuance, and
+inbox monitoring remain outside this milestone. Requests that would silently
+rewrite an externally agreed deadline stop for clarification.

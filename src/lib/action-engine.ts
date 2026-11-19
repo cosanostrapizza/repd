@@ -1,8 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { db, id } from "@/db/client";
 import {
   actionEvents,
   actions,
+  communications,
   coordinationDateOptions,
   coordinationObjectives,
   holds,
@@ -10,6 +11,7 @@ import {
   jobs,
   organizations,
   questions,
+  sources,
 } from "@/db/schema";
 
 type Rule = {
@@ -77,7 +79,9 @@ function rulesFor(
     rules.push({
       key: `invoice-ready:${job.id}`,
       kind: "invoice",
-      title: missing.length ? "Complete invoice details" : "Invoice ready for review",
+      title: missing.length
+        ? "Complete invoice details"
+        : "Invoice ready for review",
       explanation: missing.length
         ? `${job.title} cannot be prepared for invoicing until ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} recorded.`
         : `Repd can prepare an internal invoice draft from the agreed fee, billing client, and payment terms.`,
@@ -97,7 +101,10 @@ function rulesFor(
   return rules;
 }
 
-function overlapping(a: typeof holds.$inferSelect, b: typeof holds.$inferSelect) {
+function overlapping(
+  a: typeof holds.$inferSelect,
+  b: typeof holds.$inferSelect,
+) {
   return a.jobId !== b.jobId && a.startsAt < b.endsAt && a.endsAt > b.startsAt;
 }
 
@@ -194,21 +201,119 @@ async function prepareSafeInvoiceDrafts(workspaceId: string) {
           .where(eq(actions.id, action.id));
         return true;
       });
-      if (created) await db.insert(actionEvents).values({
-        id: id("aev"),
-        workspaceId,
-        actionId: action.id,
-        type: "invoice_prepared_automatically",
-        fromStatus: action.status,
-        toStatus: "pending_approval",
-        reason: "source_backed_fields_complete",
-        metadata: { externalDelivery: false },
-      });
+      if (created)
+        await db.insert(actionEvents).values({
+          id: id("aev"),
+          workspaceId,
+          actionId: action.id,
+          type: "invoice_prepared_automatically",
+          fromStatus: action.status,
+          toStatus: "pending_approval",
+          reason: "source_backed_fields_complete",
+          metadata: { externalDelivery: false },
+        });
     }
   }
 }
 
+async function evaluateConditionalFollowUps(
+  workspaceId: string,
+  now = new Date(),
+) {
+  const followUps = await db
+    .select()
+    .from(actions)
+    .where(
+      and(
+        eq(actions.workspaceId, workspaceId),
+        eq(actions.kind, "conditional_follow_up"),
+      ),
+    );
+  for (const followUp of followUps) {
+    if (
+      followUp.status === "resolved" ||
+      !followUp.deferredUntil ||
+      followUp.deferredUntil > now
+    )
+      continue;
+    const payload = followUp.payload as {
+      communicationId?: string | null;
+      expectedEvent?: string;
+    };
+    const [communication] = payload.communicationId
+      ? await db
+          .select()
+          .from(communications)
+          .where(
+            and(
+              eq(communications.id, payload.communicationId),
+              eq(communications.workspaceId, workspaceId),
+            ),
+          )
+          .limit(1)
+      : [];
+    if (communication?.status === "sent" && communication.sentAt) {
+      const [reply] = await db
+        .select({ id: sources.id })
+        .from(sources)
+        .where(
+          and(
+            eq(sources.workspaceId, workspaceId),
+            eq(sources.jobId, followUp.jobId!),
+            eq(sources.direction, "incoming"),
+            gt(sources.capturedAt, communication.sentAt),
+          ),
+        )
+        .limit(1);
+      if (reply) {
+        await db
+          .update(actions)
+          .set({
+            status: "resolved",
+            resolutionReason: "recorded_reply_found",
+            resolvedAt: now,
+            reevaluatedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(actions.id, followUp.id));
+        await db
+          .insert(actionEvents)
+          .values({
+            id: id("aev"),
+            workspaceId,
+            actionId: followUp.id,
+            type: "conditional_follow_up_resolved",
+            fromStatus: followUp.status,
+            toStatus: "resolved",
+            reason: "recorded_reply_found",
+            metadata: { sourceId: reply.id },
+          });
+        continue;
+      }
+    }
+    const awaitingDelivery = !communication || communication.status !== "sent";
+    const title = awaitingDelivery
+      ? "Send the prepared message before waiting for a reply"
+      : `No recorded reply: ${payload.expectedEvent ?? "follow up"}`;
+    const explanation = awaitingDelivery
+      ? "The related draft has not been confirmed as sent, so Repd is not claiming an external response is overdue."
+      : "The deadline passed without a reply recorded in Repd. No external inbox was checked.";
+    if (followUp.status !== "open" || followUp.title !== title)
+      await db
+        .update(actions)
+        .set({
+          status: "open",
+          title,
+          explanation,
+          reevaluatedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(actions.id, followUp.id));
+  }
+}
+
 export async function reevaluateWorkspace(workspaceId: string) {
+  await evaluateConditionalFollowUps(workspaceId);
   const allJobs = await db
     .select()
     .from(jobs)
@@ -251,7 +356,8 @@ export async function reevaluateWorkspace(workspaceId: string) {
       kind: "hold_conflict",
       title,
       explanation: `${names.join(" and ")} have overlapping active holds. Decide which takes priority.`,
-      recommendation: "Review both jobs, hold rank, and booking status before authorizing a change.",
+      recommendation:
+        "Review both jobs, hold rank, and booking status before authorizing a change.",
       priority: "urgent",
       condition: { type: "no_hold_conflict" },
       payload: { holdIds, jobIds },
@@ -268,11 +374,7 @@ export async function reevaluateWorkspace(workspaceId: string) {
     const hasKnownDateOptions = dateOptions.some(
       (option) => option.jobId === job.id,
     );
-    for (const rule of rulesFor(
-      job,
-      hasInquiryObjective,
-      hasKnownDateOptions,
-    ))
+    for (const rule of rulesFor(job, hasInquiryObjective, hasKnownDateOptions))
       desired.set(rule.key, { ...rule, jobId: job.id });
   }
   const existing = await db

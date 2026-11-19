@@ -103,8 +103,11 @@ longer the product’s organizing metaphor.
   approved, handed off, and explicitly confirmed as sent.
 - External calendar, contract, file/OCR, accounting, payment, and background
   job integrations are not connected.
-- The first conversational command set covers Today, job status, and treatment
-  commitments; unsupported mutations stop safely instead of guessing.
+- The conversational command set now composes workspace/job reads, evidence
+  inspection, treatment commitments, producer-draft preparation, dated
+  follow-ups, and eligible invoice preparation. Arbitrary record mutation and
+  direct deadline rewriting remain unsupported; consequential ambiguity stops
+  for clarification.
 - Cross-job matching is deterministic lexical matching over job, client, and
   participant names. Equal candidates require clarification.
 - PGlite is the runtime database; hosted PostgreSQL and production RLS context
@@ -161,6 +164,25 @@ source and the clean candidate, but the corrupt original cannot provide an
 independent SQL-level snapshot. Keep both the original-aside directory and the
 verified backup until the activated candidate has passed a user acceptance
 window.
+
+## Composable agent checkpoint
+
+On 2026-11-18 Ask Repd gained a typed, workspace-authorized tool registry and a
+bounded model-directed execution loop. Each model turn selects at most one
+tool; observations feed the next turn. Durable agent-run events describe actual
+searches, checks, preparations, internal writes, approval boundaries, failures,
+and completion.
+
+The New Balance acceptance flow executes real record search, job projection and
+evidence reads, an idempotent approval-gated producer draft preserving “If the
+usage includes paid social, we’ll need to revisit the licensing fee,” and one
+linked Friday follow-up. The follow-up is a deferred canonical action. Once due,
+workspace reevaluation distinguishes an unsent draft from a sent communication
+and checks only later incoming sources recorded in Repd.
+
+The implementation adds no tables and does not migrate, reset, seed, or write
+to the retained `.repd/repd.db` during automated validation. Browser tests use
+the isolated `.repd/e2e.db` store.
 
 ## Validation checkpoint
 

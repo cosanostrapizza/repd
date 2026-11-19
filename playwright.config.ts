@@ -8,16 +8,23 @@ export default defineConfig({
   use: { baseURL: "http://127.0.0.1:3100", trace: "retain-on-failure" },
   webServer: {
     command:
-      "DATABASE_URL=file://.repd/e2e.db pnpm exec next build --webpack && pnpm db:test:reset && DATABASE_URL=file://.repd/e2e.db pnpm db:seed && DATABASE_URL=file://.repd/e2e.db AI_FIXTURE_MODE=test PLAYWRIGHT_TEST=true pnpm exec next start -p 3100",
+      "pnpm exec next build --webpack && DATABASE_URL=file://.repd/e2e-desktop.db pnpm db:test:reset && DATABASE_URL=file://.repd/e2e-desktop.db pnpm db:seed && DATABASE_URL=file://.repd/e2e-mobile.db pnpm db:test:reset && DATABASE_URL=file://.repd/e2e-mobile.db pnpm db:seed && (DATABASE_URL=file://.repd/e2e-desktop.db AI_FIXTURE_MODE=test PLAYWRIGHT_TEST=true pnpm exec next start -p 3100 & DATABASE_URL=file://.repd/e2e-mobile.db AI_FIXTURE_MODE=test PLAYWRIGHT_TEST=true pnpm exec next start -p 3101 & wait)",
     url: "http://127.0.0.1:3100/api/health",
     reuseExistingServer: false,
     timeout: 120000,
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop",
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:3100" },
+    },
     {
       name: "mobile",
-      use: { ...devices["iPhone 13"], browserName: "chromium" },
+      use: {
+        ...devices["iPhone 13"],
+        browserName: "chromium",
+        baseURL: "http://127.0.0.1:3101",
+      },
     },
   ],
 });

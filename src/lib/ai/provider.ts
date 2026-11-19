@@ -411,6 +411,241 @@ class FixtureAIProvider implements AIProvider {
           ? "The campaign title and producer match."
           : null,
       };
+    } else if (purpose === "agent_next_step") {
+      const state = JSON.parse(input) as {
+        request: string;
+        contextJobId?: string | null;
+        operationKey: string;
+        now: string;
+        observations: Array<{
+          toolName: string;
+          output: Record<string, unknown>;
+        }>;
+      };
+      const request = state.request.toLowerCase();
+      const used = state.observations.map((item) => item.toolName);
+      const latest = state.observations.at(-1)?.output;
+      const search = state.observations.find(
+        (item) => item.toolName === "search_business_records",
+      )?.output as
+        | {
+            matches?: Array<{
+              jobId: string;
+              title: string;
+              participants: Array<{ personId: string; name: string }>;
+            }>;
+          }
+        | undefined;
+      const jobMatch = search?.matches?.[0];
+      const jobRead = state.observations.find(
+        (item) => item.toolName === "read_job_state",
+      )?.output as
+        | {
+            job?: { id: string; title: string };
+            dependencies?: Array<{ key: string; objectiveId: string }>;
+          }
+        | undefined;
+      const tool = (
+        toolName: string,
+        toolInput: Record<string, unknown>,
+        rationaleSummary: string,
+      ) => ({
+        kind: "tool",
+        toolName,
+        input: toolInput,
+        message: "",
+        rationaleSummary,
+      });
+      const respond = (message: string) => ({
+        kind: "respond",
+        toolName: null,
+        input: {},
+        message,
+        rationaleSummary: "Completed from executed tools.",
+      });
+      const clarify = (message: string) => ({
+        kind: "clarify",
+        toolName: null,
+        input: {},
+        message,
+        rationaleSummary: "A material reference remains ambiguous.",
+      });
+      if (/which jobs need me|needs? my attention|what.*today/.test(request)) {
+        fixture = !used.includes("read_workspace_attention")
+          ? tool(
+              "read_workspace_attention",
+              {},
+              "Check the canonical cross-job attention projection.",
+            )
+          : respond(
+              `You have ${((latest?.attention as unknown[]) ?? []).length} item(s) needing attention this week. ${
+                (
+                  (latest?.attention as Array<{
+                    jobTitle?: string;
+                    title?: string;
+                  }>) ?? []
+                )
+                  .slice(0, 4)
+                  .map((item) => `${item.jobTitle}: ${item.title}`)
+                  .join(" · ") ||
+                "Nothing currently needs a decision or approval."
+              }`,
+            );
+      } else if (/prepare invoices?/.test(request)) {
+        fixture = !used.includes("prepare_ready_invoices")
+          ? tool(
+              "prepare_ready_invoices",
+              {},
+              "Prepare eligible drafts and report missing billing inputs.",
+            )
+          : respond(
+              `Prepared ${((latest?.prepared as unknown[]) ?? []).length} invoice draft(s) for approval. ${((latest?.ineligible as Array<{ jobTitle: string; missing: string[] }>) ?? []).map((item) => `${item.jobTitle} is missing ${item.missing.join(", ")}.`).join(" ")} Nothing was issued or sent.`,
+            );
+      } else {
+        if (!used.includes("search_business_records") && !state.contextJobId) {
+          const query = /new balance/.test(request)
+            ? "New Balance"
+            : /nike/.test(request)
+              ? "Nike"
+              : /sarah/.test(request)
+                ? "Sarah"
+                : state.request;
+          fixture = tool(
+            "search_business_records",
+            { query },
+            "Resolve the referenced job and person.",
+          );
+        } else if (
+          search &&
+          new Set(search.matches?.map((match) => match.title)).size > 1 &&
+          !/new balance|nike/.test(request)
+        ) {
+          fixture = clarify(
+            `I found more than one plausible match: ${[...new Set(search.matches!.map((match) => match.title))].join(", ")}. Which job do you mean?`,
+          );
+        } else {
+          const jobId = state.contextJobId ?? jobMatch?.jobId;
+          if (!jobId)
+            fixture = clarify(
+              "I couldn’t identify a single job. Name the client, project, or producer and I’ll continue.",
+            );
+          else if (!used.includes("read_job_state"))
+            fixture = tool(
+              "read_job_state",
+              { jobId },
+              "Inspect canonical job state before acting.",
+            );
+          else if (
+            /move|change|update/.test(request) &&
+            /treatment deadline/.test(request)
+          ) {
+            fixture = clarify(
+              "Is the new treatment deadline only an internal planning date, or has the producer agreed to change the external commitment?",
+            );
+          } else if (/treatment deadline/.test(request)) {
+            if (!used.includes("record_treatment_commitment")) {
+              const dependency = jobRead?.dependencies?.find(
+                (item) => item.key === "treatment_deadline",
+              );
+              fixture = dependency
+                ? tool(
+                    "record_treatment_commitment",
+                    {
+                      objectiveId: dependency.objectiveId,
+                      decision: /cannot|can't|unable/.test(request)
+                        ? "cannot_commit"
+                        : "commit_after_deck",
+                      condition: /deck.*tomorrow|tomorrow.*deck/.test(request)
+                        ? "the promised deck arrives tomorrow and can be reviewed"
+                        : null,
+                    },
+                    "Record the explicit decision and prepare the approval-gated reply.",
+                  )
+                : clarify(
+                    "This job has no recorded treatment deadline to update.",
+                  );
+            } else
+              fixture = respond(
+                `I recorded the conditional treatment commitment for ${jobRead?.job?.title ?? "the job"}${/tomorrow/.test(request) ? ", including that the deck must arrive tomorrow," : ""} and prepared a reply for approval. Nothing has been sent.`,
+              );
+          } else if (
+            /paid social|creative deck|draft a follow-up|ask sarah/.test(
+              request,
+            )
+          ) {
+            const person =
+              jobMatch?.participants?.find((item) =>
+                /sarah/i.test(item.name),
+              ) ?? jobMatch?.participants?.[0];
+            if (!used.includes("inspect_job_evidence"))
+              fixture = tool(
+                "inspect_job_evidence",
+                { jobId },
+                "Check commercial certainty and source evidence before drafting.",
+              );
+            else if (!used.includes("prepare_producer_communication")) {
+              const condition = /paid social/.test(request)
+                ? "If the usage includes paid social, we’ll need to revisit the licensing fee."
+                : null;
+              const body = /paid social/.test(request)
+                ? `Hi ${person?.name ?? "Sarah"},\n\nCould you confirm whether the New Balance usage includes paid social? ${condition}\n\nBest,\nAlex`
+                : `Hi ${person?.name ?? "there"},\n\nI wanted to follow up on the creative deck. Could you let me know when we should expect it?\n\nBest,\nAlex`;
+              fixture = person
+                ? tool(
+                    "prepare_producer_communication",
+                    {
+                      jobId,
+                      personId: person.personId,
+                      subject: /paid social/.test(request)
+                        ? "New Balance usage clarification"
+                        : "Creative deck follow-up",
+                      body,
+                      purpose: /paid social/.test(request)
+                        ? "Clarify paid-social usage without treating proposed terms as agreed."
+                        : "Follow up on the recorded creative-deck dependency.",
+                      requiredConditionalText: condition,
+                      idempotencyKey: `${state.operationKey}:communication`,
+                    },
+                    "Prepare a reviewable draft without external delivery.",
+                  )
+                : clarify(
+                    "I found the job but not a single producer to address.",
+                  );
+            } else if (
+              /remind|hasn't replied|has not replied/.test(request) &&
+              !used.includes("create_conditional_follow_up")
+            ) {
+              const commObservation = state.observations.find(
+                (item) => item.toolName === "prepare_producer_communication",
+              )?.output as { communication?: { id: string } } | undefined;
+              const now = new Date(state.now);
+              const days = (5 - now.getUTCDay() + 7) % 7 || 7;
+              const due = new Date(now);
+              due.setUTCDate(now.getUTCDate() + days);
+              due.setUTCHours(17, 0, 0, 0);
+              fixture = tool(
+                "create_conditional_follow_up",
+                {
+                  jobId,
+                  personId: person?.personId ?? null,
+                  communicationId: commObservation?.communication?.id ?? null,
+                  dueAt: due.toISOString(),
+                  expectedEvent: "Sarah’s reply about paid-social usage",
+                  nextAction: "Remind me and review the licensing position.",
+                  idempotencyKey: `${state.operationKey}:friday-follow-up`,
+                },
+                "Persist a record-scoped Friday follow-up.",
+              );
+            } else
+              fixture = respond(
+                `I checked ${jobRead?.job?.title ?? "the job"}, prepared the producer message for approval${/remind|hasn't replied|has not replied/.test(request) ? ", and created one Friday follow-up" : ""}. Nothing has been sent; until handoff is confirmed, the follow-up is waiting on approval rather than an external reply.`,
+              );
+          } else
+            fixture = respond(
+              `${jobRead?.job?.title ?? "The job"}: ${(latest?.situation as string) ?? "I checked its current state."}`,
+            );
+        }
+      }
     } else if (purpose === "treatment_commitment_communication") {
       const parsed = JSON.parse(input) as {
         producer: { name: string | null } | null;

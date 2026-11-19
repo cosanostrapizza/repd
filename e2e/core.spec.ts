@@ -71,6 +71,7 @@ test("the universal agent resolves cross-job context and shows real execution st
   await expect(page.getByRole("link", { name: "Open job" })).toBeVisible();
   await expect(page.locator("html")).toHaveClass(/agent-panel-open/);
 });
+
 test("one workspace cannot read another workspace job", async ({
   page,
   context,
@@ -289,6 +290,40 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(page.getByLabel("Draft")).toContainText(
     "does not confirm the booking",
   );
+});
+
+test("the agent composes a usage question and one record-scoped follow-up", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/agent");
+  const instruction =
+    "Ask Sarah whether New Balance usage includes paid social. If it does, we'll need to revisit licensing. Remind me if she hasn't replied by Friday.";
+  await page.getByLabel("Instruction to Repd").fill(instruction);
+  await page.getByRole("button", { name: "Send to Repd" }).click();
+  await expect(page.locator(".agent-response")).toContainText(
+    "prepared the producer message for approval",
+  );
+  await expect(page.locator(".agent-response")).toContainText(
+    "created one Friday follow-up",
+  );
+  await page.getByText("View execution details").click();
+  await expect(
+    page.getByText("Checked terms, communications, and source evidence"),
+  ).toBeVisible();
+  await expect(page.getByText("Prepared the producer reply")).toBeVisible();
+  await expect(page.getByText("Created the dated follow-up")).toBeVisible();
+  await page.getByRole("link", { name: "Open job" }).click();
+  await page.getByText("Questions, communications, and artifacts").click();
+  await expect(page.getByText("New Balance usage clarification")).toHaveCount(
+    1,
+  );
+  await expect(
+    page
+      .locator(".record-state.draft")
+      .filter({ hasText: /^draft$/ })
+      .last(),
+  ).toBeVisible();
 });
 
 test("producer response proposes and reconciles an answer", async ({

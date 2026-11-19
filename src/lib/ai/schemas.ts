@@ -170,6 +170,16 @@ export const briefingSchema = z.object({
   summary: z.string(),
 });
 
+export const agentNextStepSchema = z.object({
+  kind: z.enum(["tool", "respond", "clarify"]),
+  toolName: z.string().nullable(),
+  input: z.record(z.string(), z.unknown()).default({}),
+  message: z.string().default(""),
+  rationaleSummary: z.string().max(300).default(""),
+});
+
+export type AgentNextStep = z.infer<typeof agentNextStepSchema>;
+
 export type InquiryExtraction = z.infer<typeof inquiryExtractionSchema>;
 export type MissingInformationAnalysis = z.infer<
   typeof missingInformationSchema
