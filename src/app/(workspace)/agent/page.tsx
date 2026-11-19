@@ -8,7 +8,14 @@ export default async function AgentPage() {
   return (
     <div className="content agent-page">
       <div className="page-head">
-        <div><p className="eyebrow">Universal workspace</p><h1>Ask Repd</h1><p className="muted">One conversation, grounded in the same jobs, actions, dependencies, and approvals as the structured workspace.</p></div>
+        <div>
+          <p className="eyebrow">Universal workspace</p>
+          <h1>Ask Repd</h1>
+          <p className="muted">
+            One conversation, grounded in the same jobs, actions, dependencies,
+            and approvals as the structured workspace.
+          </p>
+        </div>
       </div>
       <AgentPanel
         expanded
@@ -17,6 +24,7 @@ export default async function AgentPage() {
           id: message.id,
           role: message.role,
           content: message.content,
+          currentOutcome: message.currentOutcome,
         }))}
       />
     </div>

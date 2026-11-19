@@ -47,6 +47,7 @@ import {
   resolveTreatmentPreparationInput,
   treatmentCommitmentSentence,
 } from "@/lib/communication-constraints";
+import { resolveRelativeBusinessDate } from "@/lib/temporal-context";
 import { reconcileDateOptionHoldState } from "@/lib/workspace-state-rules";
 import {
   classifyPreparationFailure,
@@ -1937,6 +1938,7 @@ export async function recordTreatmentCommitmentDecision(args: {
   objectiveId: string;
   decision: "commit_after_deck" | "need_deck_first" | "cannot_commit";
   condition?: string | null;
+  instructionAt?: Date;
   provider?: AIProvider;
 }) {
   const [objective] = await db
@@ -1994,6 +1996,8 @@ export async function recordTreatmentCommitmentDecision(args: {
     prerequisite?: string | null;
     decision?: "commit_after_deck" | "need_deck_first" | "cannot_commit";
     condition?: string | null;
+    conditionResolvedDate?: string | null;
+    instructionAt?: string | null;
   } | null;
   // A retry is preparation, not a second decision. Once recorded, the
   // dependency is the authority for the exact decision and its condition.
@@ -2005,6 +2009,14 @@ export async function recordTreatmentCommitmentDecision(args: {
   });
   const effectiveDecision = preparationInput.decision;
   const effectiveCondition = preparationInput.condition;
+  const instructionAt =
+    args.instructionAt ??
+    (obligation?.instructionAt ? new Date(obligation.instructionAt) : null);
+  const conditionResolvedDate =
+    obligation?.conditionResolvedDate ??
+    (instructionAt
+      ? resolveRelativeBusinessDate(effectiveCondition, instructionAt)
+      : null);
   const now = new Date();
   const decisionResult =
     effectiveDecision === "commit_after_deck"
@@ -2038,6 +2050,10 @@ export async function recordTreatmentCommitmentDecision(args: {
             ...obligation,
             decision: effectiveDecision,
             ...(effectiveCondition ? { condition: effectiveCondition } : {}),
+            ...(conditionResolvedDate ? { conditionResolvedDate } : {}),
+            ...(instructionAt
+              ? { instructionAt: instructionAt.toISOString() }
+              : {}),
           },
           resolutionSource: "user",
           resolvedAt: now,
@@ -2121,6 +2137,10 @@ export async function recordTreatmentCommitmentDecision(args: {
         ...(effectiveCondition
           ? { treatmentCondition: effectiveCondition }
           : {}),
+        ...(conditionResolvedDate ? { conditionResolvedDate } : {}),
+        ...(instructionAt
+          ? { instructionAt: instructionAt.toISOString() }
+          : {}),
       },
       resolutionCondition: { type: "communication_sent" },
     });
@@ -2151,6 +2171,7 @@ export async function recordTreatmentCommitmentDecision(args: {
     immutableBusinessFacts: {
       treatmentDecision: effectiveDecision,
       treatmentCondition: effectiveCondition,
+      conditionResolvedDate,
       requiredCommitmentSentence,
       externalDeliveryAuthorized: false,
     },
@@ -2266,6 +2287,10 @@ export async function recordTreatmentCommitmentDecision(args: {
             treatmentDecision: effectiveDecision,
             ...(effectiveCondition
               ? { treatmentCondition: effectiveCondition }
+              : {}),
+            ...(conditionResolvedDate ? { conditionResolvedDate } : {}),
+            ...(instructionAt
+              ? { instructionAt: instructionAt.toISOString() }
               : {}),
             automaticAttempts,
           },

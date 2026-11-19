@@ -31,6 +31,7 @@ export type AgentToolContext = {
   userId: string;
   runId: string;
   threadId: string;
+  instructionAt: Date;
 };
 const searchSchema = z.object({ query: z.string().trim().min(1) });
 const jobSchema = z.object({ jobId: z.string().min(1) });
@@ -333,6 +334,7 @@ export const agentTools = {
       const actionId = await recordTreatmentCommitmentDecision({
         workspaceId: context.workspaceId,
         userId: context.userId,
+        instructionAt: context.instructionAt,
         ...input,
       });
       const [action] = await db

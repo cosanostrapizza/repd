@@ -23,6 +23,13 @@ type ConversationMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  currentOutcome?: {
+    state: string;
+    label: string;
+    detail: string;
+    href: string;
+    actionId: string;
+  } | null;
 };
 
 export function AgentPanel({
@@ -119,6 +126,23 @@ export function AgentPanel({
               >
                 <span>{message.role === "user" ? "You" : "Repd"}</span>
                 <p>{message.content}</p>
+                {message.currentOutcome && (
+                  <div
+                    className={`conversation-outcome ${message.currentOutcome.state}`}
+                  >
+                    <small>Current business state</small>
+                    <strong>{message.currentOutcome.label}</strong>
+                    <p>{message.currentOutcome.detail}</p>
+                    <Link
+                      className="button secondary small"
+                      href={message.currentOutcome.href}
+                    >
+                      {message.currentOutcome.state === "ready"
+                        ? "Review reply"
+                        : "Open current workflow"}
+                    </Link>
+                  </div>
+                )}
               </article>
             ))}
           </div>

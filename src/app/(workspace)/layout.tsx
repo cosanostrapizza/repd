@@ -58,6 +58,7 @@ export default async function WorkspaceLayout({
           id: message.id,
           role: message.role,
           content: message.content,
+          currentOutcome: message.currentOutcome,
         }))}
       />
     </div>

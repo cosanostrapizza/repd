@@ -4,10 +4,12 @@ import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db, id } from "@/db/client";
 import {
+  actions,
   agentMessages,
   agentRunEvents,
   agentRuns,
   agentThreads,
+  communications,
 } from "@/db/schema";
 import { getAIProvider } from "@/lib/ai/provider";
 import { agentNextStepSchema } from "@/lib/ai/schemas";
@@ -145,6 +147,7 @@ export async function executeAgentMessage(args: {
   threadId?: string | null;
   contextJobId?: string | null;
 }) {
+  const instructionAt = new Date();
   let threadId = args.threadId;
   if (threadId) {
     const [owned] = await db
@@ -161,39 +164,34 @@ export async function executeAgentMessage(args: {
   }
   if (!threadId) {
     threadId = id("thread");
-    await db
-      .insert(agentThreads)
-      .values({
-        id: threadId,
-        workspaceId: args.workspaceId,
-        jobId: args.contextJobId ?? null,
-        title:
-          args.content.length > 52
-            ? `${args.content.slice(0, 49)}…`
-            : args.content,
-      });
+    await db.insert(agentThreads).values({
+      id: threadId,
+      workspaceId: args.workspaceId,
+      jobId: args.contextJobId ?? null,
+      title:
+        args.content.length > 52
+          ? `${args.content.slice(0, 49)}…`
+          : args.content,
+    });
   }
   const userMessageId = id("message");
   const runId = id("agent_run");
-  await db
-    .insert(agentMessages)
-    .values({
-      id: userMessageId,
-      workspaceId: args.workspaceId,
-      threadId,
-      jobId: args.contextJobId ?? null,
-      role: "user",
-      content: args.content,
-    });
-  await db
-    .insert(agentRuns)
-    .values({
-      id: runId,
-      workspaceId: args.workspaceId,
-      threadId,
-      userMessageId,
-      jobId: args.contextJobId ?? null,
-    });
+  await db.insert(agentMessages).values({
+    id: userMessageId,
+    workspaceId: args.workspaceId,
+    threadId,
+    jobId: args.contextJobId ?? null,
+    role: "user",
+    content: args.content,
+    createdAt: instructionAt,
+  });
+  await db.insert(agentRuns).values({
+    id: runId,
+    workspaceId: args.workspaceId,
+    threadId,
+    userMessageId,
+    jobId: args.contextJobId ?? null,
+  });
 
   const operationKey = createHash("sha256")
     .update(`${threadId}\n${args.content.trim().toLowerCase()}`)
@@ -214,7 +212,7 @@ export async function executeAgentMessage(args: {
         request: args.content,
         contextJobId: args.contextJobId ?? null,
         operationKey,
-        now: new Date().toISOString(),
+        now: instructionAt.toISOString(),
         limits: { currentStep: step + 1, maxSteps: MAX_AGENT_STEPS },
         tools: toolCatalog(),
         observations,
@@ -255,7 +253,13 @@ export async function executeAgentMessage(args: {
       const result = await executeAgentTool(
         next.data.toolName,
         next.data.input,
-        { workspaceId: args.workspaceId, userId: args.userId, runId, threadId },
+        {
+          workspaceId: args.workspaceId,
+          userId: args.userId,
+          runId,
+          threadId,
+          instructionAt,
+        },
       );
       observations.push({
         toolName: next.data.toolName,
@@ -317,22 +321,20 @@ export async function executeAgentMessage(args: {
       communicationId,
     });
   const links = jobId ? [{ href: `/jobs/${jobId}`, label: "Open job" }] : [];
-  await db
-    .insert(agentMessages)
-    .values({
-      id: id("message"),
-      workspaceId: args.workspaceId,
-      threadId,
-      jobId,
-      role: "assistant",
-      content: response,
-      metadata: {
-        actionId: actionId ?? undefined,
-        communicationId: communicationId ?? undefined,
-        links,
-        clarification,
-      },
-    });
+  await db.insert(agentMessages).values({
+    id: id("message"),
+    workspaceId: args.workspaceId,
+    threadId,
+    jobId,
+    role: "assistant",
+    content: response,
+    metadata: {
+      actionId: actionId ?? undefined,
+      communicationId: communicationId ?? undefined,
+      links,
+      clarification,
+    },
+  });
   await db
     .update(agentRuns)
     .set({
@@ -384,29 +386,122 @@ export async function getAgentConversation(
         .orderBy(desc(agentThreads.updatedAt))
         .limit(1);
   if (!thread) return { thread: null, messages: [], runs: [] };
-  const [messages, runs] = await Promise.all([
-    db
-      .select()
-      .from(agentMessages)
-      .where(
-        and(
-          eq(agentMessages.workspaceId, workspaceId),
-          eq(agentMessages.threadId, thread.id),
-        ),
-      )
-      .orderBy(agentMessages.createdAt),
-    db
-      .select()
-      .from(agentRuns)
-      .where(
-        and(
-          eq(agentRuns.workspaceId, workspaceId),
-          eq(agentRuns.threadId, thread.id),
-        ),
-      )
-      .orderBy(desc(agentRuns.startedAt))
-      .limit(8),
-  ]);
+  const [messages, runs, workspaceActions, workspaceCommunications] =
+    await Promise.all([
+      db
+        .select()
+        .from(agentMessages)
+        .where(
+          and(
+            eq(agentMessages.workspaceId, workspaceId),
+            eq(agentMessages.threadId, thread.id),
+          ),
+        )
+        .orderBy(agentMessages.createdAt),
+      db
+        .select()
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.workspaceId, workspaceId),
+            eq(agentRuns.threadId, thread.id),
+          ),
+        )
+        .orderBy(desc(agentRuns.startedAt))
+        .limit(8),
+      db
+        .select()
+        .from(actions)
+        .where(eq(actions.workspaceId, workspaceId))
+        .orderBy(desc(actions.updatedAt)),
+      db
+        .select()
+        .from(communications)
+        .where(eq(communications.workspaceId, workspaceId))
+        .orderBy(desc(communications.updatedAt)),
+    ]);
+  const seenOutcomeActions = new Set<string>();
+  const outcomeByMessage = new Map<
+    string,
+    {
+      state: string;
+      label: string;
+      detail: string;
+      href: string;
+      actionId: string;
+    }
+  >();
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "assistant") continue;
+    const metadata = message.metadata as {
+      actionId?: string;
+      communicationId?: string;
+    } | null;
+    const linked = metadata?.actionId
+      ? workspaceActions.find((action) => action.id === metadata.actionId)
+      : message.jobId && /preparation failed/i.test(message.content)
+        ? workspaceActions.find(
+            (action) =>
+              action.jobId === message.jobId &&
+              action.kind === "producer_coordination",
+          )
+        : undefined;
+    if (!linked || seenOutcomeActions.has(linked.id)) continue;
+    const communication = workspaceCommunications.find(
+      (item) =>
+        item.id === metadata?.communicationId || item.actionId === linked.id,
+    );
+    let state = "current";
+    let label = "Current workflow state";
+    let detail = linked.explanation;
+    if (linked.executionStatus === "failed") {
+      state = "failed";
+      label = "Preparation still needs attention";
+      detail = linked.resolutionReason ?? linked.explanation;
+    } else if (communication?.status === "sent") {
+      state = "sent";
+      label = "Delivery confirmed";
+      detail = "The reply was recorded as sent after preparation and approval.";
+    } else if (
+      ["copied", "opened_in_client"].includes(communication?.status ?? "")
+    ) {
+      state = "handoff";
+      label = "Approved · handoff started";
+      detail = "The draft was handed off, but delivery has not been confirmed.";
+    } else if (
+      communication?.status === "approved" ||
+      linked.status === "approved"
+    ) {
+      state = "approved";
+      label = "Approved · not sent";
+      detail =
+        "The latest revision is approved for handoff. No delivery is recorded.";
+    } else if (communication && linked.status === "pending_approval") {
+      state = "ready";
+      label = "Reply ready for review";
+      detail =
+        "Preparation later succeeded. The draft is awaiting review and has not been sent.";
+    } else if (
+      linked.status === "resolved" &&
+      linked.resolutionReason === "dismissed_by_user"
+    ) {
+      state = "resolved";
+      label = "Review dismissed";
+      detail = "The prepared-work review was dismissed without delivery.";
+    } else continue;
+    seenOutcomeActions.add(linked.id);
+    outcomeByMessage.set(message.id, {
+      state,
+      label,
+      detail,
+      href: `/actions/${linked.id}`,
+      actionId: linked.id,
+    });
+  }
+  const reconciledMessages = messages.map((message) => ({
+    ...message,
+    currentOutcome: outcomeByMessage.get(message.id) ?? null,
+  }));
   const runEvents = await Promise.all(
     runs.map(async (run) => ({
       run,
@@ -422,5 +517,5 @@ export async function getAgentConversation(
         .orderBy(agentRunEvents.sequence),
     })),
   );
-  return { thread, messages, runs: runEvents };
+  return { thread, messages: reconciledMessages, runs: runEvents };
 }

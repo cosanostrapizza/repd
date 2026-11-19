@@ -276,18 +276,16 @@ async function evaluateConditionalFollowUps(
             updatedAt: now,
           })
           .where(eq(actions.id, followUp.id));
-        await db
-          .insert(actionEvents)
-          .values({
-            id: id("aev"),
-            workspaceId,
-            actionId: followUp.id,
-            type: "conditional_follow_up_resolved",
-            fromStatus: followUp.status,
-            toStatus: "resolved",
-            reason: "recorded_reply_found",
-            metadata: { sourceId: reply.id },
-          });
+        await db.insert(actionEvents).values({
+          id: id("aev"),
+          workspaceId,
+          actionId: followUp.id,
+          type: "conditional_follow_up_resolved",
+          fromStatus: followUp.status,
+          toStatus: "resolved",
+          reason: "recorded_reply_found",
+          metadata: { sourceId: reply.id },
+        });
         continue;
       }
     }
@@ -466,19 +464,47 @@ export async function reevaluateWorkspace(workspaceId: string) {
           updatedAt: new Date(),
         })
         .where(eq(actions.id, found.id));
-    else
+    else {
+      const foundPayload = found.payload as {
+        preferenceHoldId?: string;
+        preferenceRecordedAt?: string;
+        preferenceRecordedByUserId?: string;
+      };
+      const rulePayload = rule.payload ?? found.payload;
+      const payload =
+        rule.kind === "hold_conflict" && foundPayload.preferenceHoldId
+          ? {
+              ...rulePayload,
+              preferenceHoldId: foundPayload.preferenceHoldId,
+              preferenceRecordedAt: foundPayload.preferenceRecordedAt,
+              preferenceRecordedByUserId:
+                foundPayload.preferenceRecordedByUserId,
+            }
+          : rulePayload;
+      const preferredHold =
+        rule.kind === "hold_conflict" && foundPayload.preferenceHoldId
+          ? activeHolds.find(
+              (hold) => hold.id === foundPayload.preferenceHoldId,
+            )
+          : null;
+      const preferredJob = preferredHold
+        ? jobById.get(preferredHold.jobId)
+        : null;
       await db
         .update(actions)
         .set({
           title: rule.title,
-          explanation: rule.explanation,
+          explanation: preferredJob
+            ? `${preferredJob.title} is recorded as the scheduling priority. Both holds remain active and no booking has been confirmed.`
+            : rule.explanation,
           recommendation: rule.recommendation,
           priority: rule.priority,
-          payload: rule.payload ?? found.payload,
+          payload,
           requiresApproval: rule.approval ?? found.requiresApproval,
           reevaluatedAt: new Date(),
         })
         .where(eq(actions.id, found.id));
+    }
   }
   const deterministicKinds = new Set([
     "hold_conflict",

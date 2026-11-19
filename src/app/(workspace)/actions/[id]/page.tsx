@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import {
   actions,
   communications,
+  coordinationDependencies,
   holds,
   invoiceDrafts,
   jobs,
@@ -16,8 +17,13 @@ import {
 } from "@/db/schema";
 import { prepareInvoice } from "@/lib/agent-actions";
 import { requireContext } from "@/lib/auth";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { bookingLabels, formatMoney } from "@/lib/domain";
-import { transitionAction, transitionHold } from "@/lib/server-actions";
+import {
+  recordHoldPreference,
+  transitionAction,
+  transitionHold,
+} from "@/lib/server-actions";
 
 export default async function ActionWorkspace({
   params,
@@ -35,16 +41,16 @@ export default async function ActionWorkspace({
     .limit(1);
   if (!row) notFound();
   const { action, job, person } = row;
-  if (
-    job &&
-    [
-      "producer_coordination",
-      "missing_information",
-      "advance_inquiry",
-      "treatment_commitment",
-    ].includes(action.kind)
-  )
+  if (job && ["advance_inquiry", "treatment_commitment"].includes(action.kind))
     redirect(`/jobs/${job.id}#coordination`);
+  const pageTitle =
+    action.kind === "invoice" && action.status !== "open"
+      ? "Review invoice draft"
+      : action.title;
+  const pageExplanation =
+    action.kind === "invoice" && action.status !== "open"
+      ? "Repd prepared this internal invoice draft from the recorded job terms. Review its actual contents below; it has not been issued or sent."
+      : action.explanation;
   const header = (
     <header className="detail-head">
       <div className="detail-head-inner">
@@ -53,15 +59,18 @@ export default async function ActionWorkspace({
             <p className="eyebrow">
               Prepared work · {action.kind.replaceAll("_", " ")}
             </p>
-            <h1>{action.title}</h1>
-            <p className="lede">{action.explanation}</p>
+            <h1>{pageTitle}</h1>
+            <p className="lede">{pageExplanation}</p>
           </div>
           <div>
             <span className={`badge ${action.priority}`}>
               {action.status.replaceAll("_", " ")}
             </span>
             {job && (
-              <Link href={`/jobs/${job.id}`} className="button ghost">
+              <Link
+                href={`/jobs/${job.id}#next-steps`}
+                className="button ghost"
+              >
                 View {job.title} →
               </Link>
             )}
@@ -117,6 +126,37 @@ export default async function ActionWorkspace({
           .orderBy(desc(sources.capturedAt))
           .limit(3)
       : [];
+    const treatmentPayload = action.payload as {
+      treatmentCondition?: string;
+      conditionResolvedDate?: string;
+      instructionAt?: string;
+    };
+    const objectiveDependencies = action.objectiveId
+      ? await db
+          .select()
+          .from(coordinationDependencies)
+          .where(
+            and(
+              eq(coordinationDependencies.workspaceId, ctx.workspaceId),
+              eq(coordinationDependencies.objectiveId, action.objectiveId),
+            ),
+          )
+      : [];
+    const treatmentDependency = objectiveDependencies.find(
+      (dependency) => dependency.key === "treatment_deadline",
+    );
+    const deckDependency = objectiveDependencies.find(
+      (dependency) => dependency.key === "deck_arrival",
+    );
+    const dependencyValue = treatmentDependency?.value as {
+      dueDate?: string | null;
+      conditionResolvedDate?: string | null;
+    } | null;
+    const resolvedConditionDate =
+      treatmentPayload.conditionResolvedDate ??
+      dependencyValue?.conditionResolvedDate ??
+      (deckDependency?.value as { dueDate?: string | null } | null)?.dueDate ??
+      null;
     return (
       <>
         {header}
@@ -145,6 +185,36 @@ export default async function ActionWorkspace({
               </strong>
             </div>
           </section>
+          {(treatmentPayload.treatmentCondition ||
+            dependencyValue?.dueDate) && (
+            <section
+              className="review-commitments"
+              aria-label="Critical commitments and conditions"
+            >
+              <div>
+                <span>Treatment deadline</span>
+                <strong>
+                  {dependencyValue?.dueDate
+                    ? formatCalendarDate(dependencyValue.dueDate)
+                    : "Recorded in the job"}
+                </strong>
+              </div>
+              <div>
+                <span>Condition</span>
+                <strong>
+                  {treatmentPayload.treatmentCondition ??
+                    "Review the promised deck"}
+                </strong>
+                {resolvedConditionDate && (
+                  <small>
+                    “Tomorrow” was anchored to{" "}
+                    {formatCalendarDate(resolvedConditionDate)} from the
+                    original instruction.
+                  </small>
+                )}
+              </div>
+            </section>
+          )}
           <section className="card card-pad recommendation">
             <p className="eyebrow">Repd’s recommendation</p>
             <h2>{action.recommendation}</h2>
@@ -221,7 +291,11 @@ export default async function ActionWorkspace({
           own.startsAt < other.hold.endsAt && own.endsAt > other.hold.startsAt,
       ),
     );
-    const conflictPayload = action.payload as { holdIds?: string[] };
+    const conflictPayload = action.payload as {
+      holdIds?: string[];
+      preferenceHoldId?: string;
+      preferenceRecordedAt?: string;
+    };
     const cards = conflictPayload.holdIds?.length
       ? [
           ...mine
@@ -232,8 +306,9 @@ export default async function ActionWorkspace({
           ),
         ].filter(
           (item, index, rows) =>
-            rows.findIndex((candidate) => candidate.hold.id === item.hold.id) ===
-            index,
+            rows.findIndex(
+              (candidate) => candidate.hold.id === item.hold.id,
+            ) === index,
         )
       : [...mine.map((hold) => ({ hold, job })), ...conflicts];
     return (
@@ -244,10 +319,16 @@ export default async function ActionWorkspace({
             <main>
               <section className="card card-pad section">
                 <p className="eyebrow">Scheduling decision</p>
-                <h2>{action.title}</h2>
-                <p>{action.explanation}</p>
+                <h2>Which job should take priority?</h2>
+                <p>
+                  Record a scheduling preference without confirming a booking or
+                  releasing either hold.
+                </p>
                 {cards.map((item) => (
-                  <article className="hold-decision" key={item.hold.id}>
+                  <article
+                    className={`hold-decision ${conflictPayload.preferenceHoldId === item.hold.id ? "preferred" : ""}`}
+                    key={item.hold.id}
+                  >
                     <div>
                       <span className={`hold-rank ${item.hold.kind}`}>
                         {item.hold.kind === "confirmed"
@@ -269,31 +350,64 @@ export default async function ActionWorkspace({
                         })}
                       </p>
                       <p>
-                        {formatMoney(item.job.feeCents, item.job.currency)} ·{" "}
-                        {bookingLabels[item.job.bookingStatus]}
+                        {item.job.feeState === "confirmed"
+                          ? "Agreed"
+                          : "Proposed"}{" "}
+                        fee {formatMoney(item.job.feeCents, item.job.currency)}
                       </p>
+                      <p>
+                        Booking status: {bookingLabels[item.job.bookingStatus]}
+                      </p>
+                      {conflictPayload.preferenceHoldId === item.hold.id && (
+                        <span className="preference-note">
+                          Current priority preference
+                        </span>
+                      )}
                     </div>
-                    <form action={transitionHold} className="action-controls">
-                      <input type="hidden" name="holdId" value={item.hold.id} />
-                      {item.hold.kind !== "confirmed" && (
+                    <div className="action-controls conflict-actions">
+                      <form action={recordHoldPreference}>
+                        <input
+                          type="hidden"
+                          name="actionId"
+                          value={action.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="holdId"
+                          value={item.hold.id}
+                        />
                         <button
                           className="button small"
-                          name="transition"
-                          value="confirm"
+                          disabled={
+                            conflictPayload.preferenceHoldId === item.hold.id
+                          }
                         >
-                          Keep and confirm
+                          {conflictPayload.preferenceHoldId === item.hold.id
+                            ? "Priority recorded"
+                            : `Prefer ${item.job.title}`}
                         </button>
-                      )}
-                      <button
-                        className="button secondary small"
-                        name="transition"
-                        value="release"
-                      >
-                        Release this hold
-                      </button>
-                    </form>
+                      </form>
+                      <form action={transitionHold}>
+                        <input
+                          type="hidden"
+                          name="holdId"
+                          value={item.hold.id}
+                        />
+                        <button
+                          className="button secondary small"
+                          name="transition"
+                          value="release"
+                        >
+                          Release this hold
+                        </button>
+                      </form>
+                    </div>
                   </article>
                 ))}
+                <p className="trust-note">
+                  A preference is internal. Confirming a booking requires actual
+                  producer confirmation or an explicit booking record.
+                </p>
               </section>
             </main>
             <aside>
@@ -336,26 +450,8 @@ export default async function ActionWorkspace({
           <div className="decision-grid">
             <main>
               <section className="card card-pad">
-                <p className="eyebrow">Invoice preparation</p>
+                <p className="eyebrow">Invoice review</p>
                 <h2>{job.title}</h2>
-                <div className="invoice-preview">
-                  <div>
-                    <span>Bill to</span>
-                    <strong>{draft?.billingName ?? "Missing"}</strong>
-                  </div>
-                  <div>
-                    <span>Creative fee</span>
-                    <strong>{formatMoney(job.feeCents, job.currency)}</strong>
-                  </div>
-                  <div>
-                    <span>Payment terms</span>
-                    <strong>{job.paymentTerms ?? "Missing"}</strong>
-                  </div>
-                  <div>
-                    <span>Preparation status</span>
-                    <strong>{draft?.status ?? "Not prepared"}</strong>
-                  </div>
-                </div>
                 {missing.length > 0 ? (
                   <div className="form-message error">
                     Missing before a complete invoice: {missing.join(", ")}.
@@ -375,17 +471,12 @@ export default async function ActionWorkspace({
                   </form>
                 )}
                 {draft && (
-                  <>
-                    <p className="trust-note">
-                      This is an editable internal preview. It has no invoice
-                      number and has not been issued or sent.
-                    </p>
-                    <InvoiceDraftEditor
-                      draft={draft}
-                      fallbackDescription={`Creative fee — ${job.title}`}
-                      currency={job.currency}
-                    />
-                  </>
+                  <InvoiceDraftEditor
+                    draft={draft}
+                    fallbackDescription={`Creative fee — ${job.title}`}
+                    currency={job.currency}
+                    actionId={action.id}
+                  />
                 )}
               </section>
             </main>

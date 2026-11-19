@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   approveCommunication,
   confirmCommunicationSent,
@@ -46,7 +46,15 @@ export function CommunicationEditor({
   }>;
 }) {
   void _actionId;
-  const [saveState, saveAction] = useActionState(saveCommunication, initial);
+  const [dirty, setDirty] = useState(false);
+  const [saveState, saveAction] = useActionState(
+    async (previous: AgentFormState, data: FormData) => {
+      const result = await saveCommunication(previous, data);
+      if (result.success) setDirty(false);
+      return result;
+    },
+    initial,
+  );
   const [rewriteState, rewriteAction] = useActionState(
     reviseCommunication,
     initial,
@@ -70,6 +78,14 @@ export function CommunicationEditor({
     startTransition(() => recordCommunicationHandoff(data));
   };
   const mailto = `mailto:${encodeURIComponent(communication.toEmail ?? "")}?subject=${encodeURIComponent(communication.subject)}&body=${encodeURIComponent(communication.body)}`;
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   return (
     <div className="communication-workspace compact-communication">
       <section className="communication-draft">
@@ -84,7 +100,7 @@ export function CommunicationEditor({
             {communication.status.replaceAll("_", " ")}
           </span>
         </div>
-        <form action={saveAction}>
+        <form action={saveAction} onChange={() => setDirty(true)}>
           <input
             type="hidden"
             name="communicationId"
@@ -195,7 +211,9 @@ export function CommunicationEditor({
                 name="communicationId"
                 value={communication.id}
               />
-              <button className="button">Approve draft</button>
+              <button className="button" disabled={dirty}>
+                {dirty ? "Save edits before approval" : "Approve draft"}
+              </button>
             </form>
           )}
           {["approved", "copied", "opened_in_client"].includes(

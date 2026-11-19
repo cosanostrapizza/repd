@@ -11,6 +11,8 @@ import {
   coordinationObjectives,
   holds,
   invoiceDrafts,
+  jobFieldRevisions,
+  jobFields,
   jobs,
   organizations,
   questions,
@@ -27,7 +29,10 @@ import {
   isResolvedTreatmentDecisionAction,
   reconcileDateOptionHoldState,
 } from "@/lib/workspace-state-rules";
-export { actionAttentionRank, isActionActive } from "@/lib/workspace-state-rules";
+export {
+  actionAttentionRank,
+  isActionActive,
+} from "@/lib/workspace-state-rules";
 
 export type WorkspaceWorkItem = {
   id: string;
@@ -48,18 +53,15 @@ export type WorkspaceWorkItem = {
 function actionHref(action: Action) {
   if (
     action.jobId &&
-    [
-      "producer_coordination",
-      "missing_information",
-      "advance_inquiry",
-      "treatment_commitment",
-    ].includes(action.kind)
+    ["advance_inquiry", "treatment_commitment"].includes(action.kind)
   )
     return `/jobs/${action.jobId}#active-work`;
   return `/actions/${action.id}`;
 }
 
-function actionResponsibility(action: Action): WorkspaceWorkItem["responsibility"] {
+function actionResponsibility(
+  action: Action,
+): WorkspaceWorkItem["responsibility"] {
   if (action.executionStatus === "failed") return "you";
   if (action.status === "executing") return "repd";
   return "you";
@@ -78,79 +80,106 @@ export async function getJobWorkspaceState(
     .limit(1);
   if (!jobRow) return null;
 
-  const [directJobActions, sharedConflictActions, objectives, messages, drafts, activeQuestions, recent, documents, jobHolds] =
-    await Promise.all([
-      db
-        .select()
-        .from(actions)
-        .where(and(eq(actions.workspaceId, workspaceId), eq(actions.jobId, jobId)))
-        .orderBy(desc(actions.updatedAt)),
-      db
-        .select()
-        .from(actions)
-        .where(
-          and(
-            eq(actions.workspaceId, workspaceId),
-            eq(actions.kind, "hold_conflict"),
-          ),
-        )
-        .orderBy(desc(actions.updatedAt)),
-      db
-        .select()
-        .from(coordinationObjectives)
-        .where(
-          and(
-            eq(coordinationObjectives.workspaceId, workspaceId),
-            eq(coordinationObjectives.jobId, jobId),
-          ),
-        )
-        .orderBy(desc(coordinationObjectives.updatedAt)),
-      db
-        .select()
-        .from(communications)
-        .where(
-          and(
-            eq(communications.workspaceId, workspaceId),
-            eq(communications.jobId, jobId),
-          ),
-        )
-        .orderBy(desc(communications.updatedAt)),
-      db
-        .select()
-        .from(invoiceDrafts)
-        .where(
-          and(
-            eq(invoiceDrafts.workspaceId, workspaceId),
-            eq(invoiceDrafts.jobId, jobId),
-          ),
-        )
-        .orderBy(desc(invoiceDrafts.updatedAt)),
-      db
-        .select()
-        .from(questions)
-        .where(
-          and(eq(questions.workspaceId, workspaceId), eq(questions.jobId, jobId)),
-        )
-        .orderBy(desc(questions.updatedAt)),
-      db
-        .select()
-        .from(activities)
-        .where(
-          and(eq(activities.workspaceId, workspaceId), eq(activities.jobId, jobId)),
-        )
-        .orderBy(desc(activities.createdAt))
-        .limit(12),
-      db
-        .select()
-        .from(sources)
-        .where(and(eq(sources.workspaceId, workspaceId), eq(sources.jobId, jobId)))
-        .orderBy(desc(sources.capturedAt)),
-      db
-        .select()
-        .from(holds)
-        .where(and(eq(holds.workspaceId, workspaceId), eq(holds.jobId, jobId)))
-        .orderBy(desc(holds.createdAt)),
-    ]);
+  const [
+    directJobActions,
+    sharedConflictActions,
+    objectives,
+    messages,
+    drafts,
+    activeQuestions,
+    recent,
+    documents,
+    jobHolds,
+    acceptedFields,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(actions)
+      .where(
+        and(eq(actions.workspaceId, workspaceId), eq(actions.jobId, jobId)),
+      )
+      .orderBy(desc(actions.updatedAt)),
+    db
+      .select()
+      .from(actions)
+      .where(
+        and(
+          eq(actions.workspaceId, workspaceId),
+          eq(actions.kind, "hold_conflict"),
+        ),
+      )
+      .orderBy(desc(actions.updatedAt)),
+    db
+      .select()
+      .from(coordinationObjectives)
+      .where(
+        and(
+          eq(coordinationObjectives.workspaceId, workspaceId),
+          eq(coordinationObjectives.jobId, jobId),
+        ),
+      )
+      .orderBy(desc(coordinationObjectives.updatedAt)),
+    db
+      .select()
+      .from(communications)
+      .where(
+        and(
+          eq(communications.workspaceId, workspaceId),
+          eq(communications.jobId, jobId),
+        ),
+      )
+      .orderBy(desc(communications.updatedAt)),
+    db
+      .select()
+      .from(invoiceDrafts)
+      .where(
+        and(
+          eq(invoiceDrafts.workspaceId, workspaceId),
+          eq(invoiceDrafts.jobId, jobId),
+        ),
+      )
+      .orderBy(desc(invoiceDrafts.updatedAt)),
+    db
+      .select()
+      .from(questions)
+      .where(
+        and(eq(questions.workspaceId, workspaceId), eq(questions.jobId, jobId)),
+      )
+      .orderBy(desc(questions.updatedAt)),
+    db
+      .select()
+      .from(activities)
+      .where(
+        and(
+          eq(activities.workspaceId, workspaceId),
+          eq(activities.jobId, jobId),
+        ),
+      )
+      .orderBy(desc(activities.createdAt))
+      .limit(12),
+    db
+      .select()
+      .from(sources)
+      .where(
+        and(eq(sources.workspaceId, workspaceId), eq(sources.jobId, jobId)),
+      )
+      .orderBy(desc(sources.capturedAt)),
+    db
+      .select()
+      .from(holds)
+      .where(and(eq(holds.workspaceId, workspaceId), eq(holds.jobId, jobId)))
+      .orderBy(desc(holds.createdAt)),
+    db
+      .select({ field: jobFields, revision: jobFieldRevisions })
+      .from(jobFields)
+      .leftJoin(
+        jobFieldRevisions,
+        eq(jobFields.acceptedRevisionId, jobFieldRevisions.id),
+      )
+      .where(
+        and(eq(jobFields.workspaceId, workspaceId), eq(jobFields.jobId, jobId)),
+      ),
+  ]);
 
   const directActionIds = new Set(directJobActions.map((action) => action.id));
   const jobActions = [
@@ -192,10 +221,10 @@ export async function getJobWorkspaceState(
 
   const dependencyByObjectiveAndKey = new Map(
     dependencyGroups.flatMap(({ objective, dependencies }) =>
-      dependencies.map((dependency) => [
-        `${objective.id}:${dependency.key}`,
-        dependency,
-      ] as const),
+      dependencies.map(
+        (dependency) =>
+          [`${objective.id}:${dependency.key}`, dependency] as const,
+      ),
     ),
   );
   const resolvedTreatmentObjectiveIds = new Set(
@@ -212,16 +241,20 @@ export async function getJobWorkspaceState(
   const activeActions = jobActions.filter((action) => {
     if (!isActionActive(action, now)) return false;
     if (
-      actionDependencyIsResolved(action, (objectiveId, key) =>
-        dependencyByObjectiveAndKey.get(`${objectiveId}:${key}`)?.status,
+      actionDependencyIsResolved(
+        action,
+        (objectiveId, key) =>
+          dependencyByObjectiveAndKey.get(`${objectiveId}:${key}`)?.status,
       )
-    ) return false;
+    )
+      return false;
     // Legacy action rows predate dependency-based resolution conditions. The
     // resolved dependency remains authoritative even when those rows still
     // carry an open status or an older kind.
     if (
       isResolvedTreatmentDecisionAction(action, resolvedTreatmentObjectiveIds)
-    ) return false;
+    )
+      return false;
     return true;
   });
   const actionItems: WorkspaceWorkItem[] = activeActions.map((action) => ({
@@ -233,10 +266,12 @@ export async function getJobWorkspaceState(
     title: actionAttentionLabel(action),
     detail:
       action.executionStatus === "failed"
-        ? action.resolutionReason ?? action.explanation
+        ? (action.resolutionReason ?? action.explanation)
         : action.explanation,
     state:
-      action.executionStatus === "failed" ? "preparation_failed" : action.status,
+      action.executionStatus === "failed"
+        ? "preparation_failed"
+        : action.status,
     responsibility: actionResponsibility(action),
     priority: action.priority,
     rank: actionAttentionRank(action),
@@ -277,7 +312,9 @@ export async function getJobWorkspaceState(
     .flatMap((group) => group.dateOptions)
     .find((option) => option.clientSelected);
   const currentDateOptions = dependencyGroups.flatMap((group) => {
-    const groupHasSelection = group.dateOptions.some((option) => option.clientSelected);
+    const groupHasSelection = group.dateOptions.some(
+      (option) => option.clientSelected,
+    );
     return group.dateOptions.map((option) => ({
       ...option,
       holdState: groupHasSelection
@@ -297,6 +334,12 @@ export async function getJobWorkspaceState(
         dependency.status === "resolved" &&
         dependency.resolutionSource === "user",
     );
+  const fieldState = new Map(
+    acceptedFields.map(({ field, revision }) => [
+      field.key,
+      revision?.informationState ?? null,
+    ]),
+  );
   const bookingSummary =
     jobRow.job.bookingStatus === "confirmed"
       ? "The booking is confirmed."
@@ -322,6 +365,72 @@ export async function getJobWorkspaceState(
       : null,
   ].filter((part): part is string => Boolean(part));
   const situation = situationParts.join(" ");
+  const situationSummary = selectedDate
+    ? `${selectedDate.label} is selected for the shoot. ${bookingSummary}`
+    : bookingSummary;
+  const situationFacts = [
+    selectedDate
+      ? { label: "Shoot date", value: selectedDate.label, note: "Selected" }
+      : null,
+    {
+      label: "Booking",
+      value: bookingLabels[jobRow.job.bookingStatus],
+      note:
+        jobRow.job.bookingStatus === "confirmed"
+          ? "Confirmed"
+          : "Not confirmed",
+    },
+    jobRow.job.feeCents
+      ? {
+          label: "Creative fee",
+          value: formatMoney(jobRow.job.feeCents, jobRow.job.currency),
+          note:
+            fieldState.get("feeCents") === "confirmed" ||
+            jobRow.job.feeState === "confirmed"
+              ? "Agreed"
+              : "Proposed",
+        }
+      : null,
+    jobRow.job.usageTerms
+      ? {
+          label: "Usage",
+          value: jobRow.job.usageTerms,
+          note:
+            fieldState.get("usageTerms") === "confirmed"
+              ? "Agreed terms"
+              : "Proposed terms",
+        }
+      : null,
+    jobRow.job.usageTerms?.toLocaleLowerCase().includes("quoted separately")
+      ? {
+          label: "Licensing fee",
+          value: "Quoted separately",
+          note: "Not included in creative fee",
+        }
+      : null,
+    treatmentCommitment
+      ? {
+          label: "Treatment",
+          value: treatmentCommitment.result.replace(/^Alex /, "You "),
+          note: "Conditional commitment",
+        }
+      : null,
+    dependencyGroups
+      .flatMap((group) => group.dependencies)
+      .find(
+        (dependency) =>
+          dependency.key === "deck_arrival" &&
+          dependency.status === "needs_external",
+      )
+      ? {
+          label: "Outstanding",
+          value: "Creative deck",
+          note: "Waiting on producer",
+        }
+      : null,
+  ].filter((fact): fact is { label: string; value: string; note: string } =>
+    Boolean(fact),
+  );
   const attention = primary
     ? {
         label: primary.title,
@@ -339,6 +448,8 @@ export async function getJobWorkspaceState(
   return {
     ...jobRow,
     situation,
+    situationSummary,
+    situationFacts,
     attention,
     lifecycleLabel: lifecycleLabels[jobRow.job.lifecycleStatus],
     bookingLabel: bookingLabels[jobRow.job.bookingStatus],
@@ -412,8 +523,7 @@ export async function getWorkspaceTodayState(
       state.recent.map((activity) => ({ activity, jobTitle: state.job.title })),
     )
     .sort(
-      (a, b) =>
-        b.activity.createdAt.getTime() - a.activity.createdAt.getTime(),
+      (a, b) => b.activity.createdAt.getTime() - a.activity.createdAt.getTime(),
     )
     .slice(0, 8);
   return {

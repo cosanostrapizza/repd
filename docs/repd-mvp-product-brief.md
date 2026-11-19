@@ -83,6 +83,11 @@ truth.
 Copying or opening a draft is not delivery. A client-selected date is not a
 confirmed booking. A conditional commitment must remain conditional.
 
+Choosing which overlapping opportunity should take priority is also not a
+booking confirmation. Repd may record that internal preference while both
+holds remain active; release and confirmation require their own authorized
+commands and evidence.
+
 ## Primary product surfaces
 
 - **Today:** a concise manager briefing led by genuine user decisions,
@@ -98,6 +103,10 @@ confirmed booking. A conditional commitment must remain conditional.
   structured workspace, preserves page context without limiting cross-job
   work, and keeps external-message approval distinct from submitting an
   instruction to Repd.
+
+Prepared communications and invoices open in focused action-backed review
+surfaces. Job Workspace remains the business overview. Approval records an
+internal decision only and never implies external delivery or invoice issuance.
 
 The detailed interaction and technical contracts live in
 `docs/agent-native-architecture.md`. Shipped reality and limitations live in

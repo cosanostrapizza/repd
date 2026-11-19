@@ -29,6 +29,15 @@ const conflictIncludesHold = (
   const payload = action.payload as { holdIds?: string[] };
   return payload.holdIds?.includes(holdId) ?? false;
 };
+const isPreferredHold = (
+  action: typeof actions.$inferSelect | undefined,
+  holdId: string,
+) =>
+  Boolean(
+    action &&
+    (action.payload as { preferenceHoldId?: string }).preferenceHoldId ===
+      holdId,
+  );
 export default async function CalendarPage({
   searchParams,
 }: {
@@ -162,7 +171,11 @@ export default async function CalendarPage({
                         {hold.kind === "confirmed"
                           ? "confirmed work"
                           : `${hold.kind} hold`}
-                        {conflicting.has(hold.id) ? " · decision needed" : ""}
+                        {isPreferredHold(action, hold.id)
+                          ? " · priority preference"
+                          : conflicting.has(hold.id)
+                            ? " · decision needed"
+                            : ""}
                       </small>
                     </Link>
                   );
@@ -212,21 +225,28 @@ export default async function CalendarPage({
                     {hold.kind === "confirmed" ? "booking" : "hold"}
                   </p>
                   {conflicting.has(hold.id) && (
-                    <Link
-                      className="button secondary small"
-                      href={
-                        conflictAction
-                          ? `/actions/${conflictAction.id}`
-                          : `/jobs/${job.id}`
-                      }
-                    >
-                      Review conflict
-                    </Link>
+                    <>
+                      {isPreferredHold(conflictAction, hold.id) && (
+                        <span className="preference-note">
+                          Priority preference
+                        </span>
+                      )}
+                      <Link
+                        className="button secondary small"
+                        href={
+                          conflictAction
+                            ? `/actions/${conflictAction.id}`
+                            : `/jobs/${job.id}`
+                        }
+                      >
+                        Review conflict
+                      </Link>
+                    </>
                   )}
                 </div>
                 <form action={transitionHold}>
                   <input type="hidden" name="holdId" value={hold.id} />
-                  {hold.kind !== "confirmed" && (
+                  {hold.kind !== "confirmed" && !conflictAction && (
                     <button
                       className="button small"
                       name="transition"

@@ -43,6 +43,11 @@ Every job presents three primary concepts:
 Routine producer updates are initiated inside the job rather than through a
 separate workflow page. Legacy destinations may redirect to the job.
 
+Prepared work is represented by a compact current-state card. Its action route
+is the single focused review surface; Job Workspace does not mount another
+editor. Returning to the job re-reads the canonical action, approval, and
+delivery state.
+
 ### Universal agent
 
 The agent opens as a docked, width-adjustable desktop panel that reflows the
@@ -104,6 +109,10 @@ The Jobs table consumes these same job projections and their canonical
 attention label; it does not infer a separate next need from lifecycle fields.
 Shared hold-conflict actions project into every affected job and are
 deduplicated when the workspace projection is assembled.
+
+The job projection also owns the short situation summary and compact facts.
+Components do not independently infer proposed versus agreed terms, booking
+certainty, prepared state, or current conflict preference.
 
 An active action is non-resolved, non-superseded, and either not deferred or
 due. An action whose canonical resolution dependency is satisfied is also
@@ -171,6 +180,11 @@ claim a mutation or external execution unless the command and event succeeded.
   hold records; resolving a hold reevaluates the shared action for every
   affected job.
 - communication approval, handoff, and delivery assertion remain distinct.
+- a hold priority preference is internal metadata on the shared conflict; it
+  cannot confirm a booking or release a hold;
+- invoice draft approval is not invoice issuance or delivery;
+- historical agent messages remain immutable while their linked operation may
+  expose one separately resolved current-outcome card.
 
 ## 8. Intended versus implemented
 
@@ -178,7 +192,17 @@ This document is the intended contract. `PROJECT_STATE.md` is authoritative for
 what is implemented. `IMPLEMENTATION.md` records sequencing and acceptance
 coverage. Where they differ, the project-state limitation describes reality.
 
-## 9. Composable tool execution
+## 9. Temporal context
+
+Agent instructions have a durable instruction timestamp. Relative business
+dates such as “tomorrow” are resolved once against that timestamp and the
+configured business timezone, then stored with the authoritative dependency
+and preparation action. Retries reuse the saved decision, condition, and
+resolved date. Review may show both the conversational phrase and its anchored
+calendar date. Historical values are not reconstructed when original context
+is insufficient.
+
+## 10. Composable tool execution
 
 Ask Repd now uses a bounded, one-tool-at-a-time orchestration loop. The model
 selects one authorized tool, its Zod input is validated, the operation runs,

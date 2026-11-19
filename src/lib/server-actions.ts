@@ -538,6 +538,72 @@ export async function transitionHold(formData: FormData) {
   revalidatePath("/");
 }
 
+export async function recordHoldPreference(formData: FormData) {
+  const ctx = await requireContext();
+  const actionId = text(formData, "actionId");
+  const holdId = text(formData, "holdId");
+  const [row] = await db
+    .select({ action: actions, hold: holds })
+    .from(actions)
+    .innerJoin(holds, eq(holds.id, holdId))
+    .where(
+      and(
+        eq(actions.id, actionId),
+        eq(actions.workspaceId, ctx.workspaceId),
+        eq(actions.kind, "hold_conflict"),
+        eq(holds.workspaceId, ctx.workspaceId),
+        eq(holds.status, "active"),
+      ),
+    )
+    .limit(1);
+  const payload = row?.action.payload as
+    | {
+        holdIds?: string[];
+        jobIds?: string[];
+      }
+    | undefined;
+  if (!row || !payload?.holdIds?.includes(holdId)) return;
+  const now = new Date();
+  const [preferredJob] = await db
+    .select({ title: jobs.title })
+    .from(jobs)
+    .where(
+      and(eq(jobs.id, row.hold.jobId), eq(jobs.workspaceId, ctx.workspaceId)),
+    )
+    .limit(1);
+  await db
+    .update(actions)
+    .set({
+      payload: {
+        ...payload,
+        preferenceHoldId: holdId,
+        preferenceRecordedAt: now.toISOString(),
+        preferenceRecordedByUserId: ctx.userId,
+      },
+      explanation: `${preferredJob?.title ?? "The selected job"} is recorded as the scheduling priority. Both holds remain active and no booking has been confirmed.`,
+      updatedAt: now,
+    })
+    .where(eq(actions.id, actionId));
+  await db.insert(actionEvents).values({
+    id: id("aev"),
+    workspaceId: ctx.workspaceId,
+    actionId,
+    type: "hold_preference_recorded",
+    fromStatus: row.action.status,
+    toStatus: row.action.status,
+    metadata: {
+      preferredHoldId: holdId,
+      preferredJobId: row.hold.jobId,
+      bookingConfirmed: false,
+      holdReleased: false,
+    },
+  });
+  revalidatePath(`/actions/${actionId}`);
+  for (const jobId of payload.jobIds ?? []) revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/calendar");
+  revalidatePath("/");
+}
+
 export async function transitionAction(formData: FormData) {
   const ctx = await requireContext();
   const actionId = text(formData, "actionId"),

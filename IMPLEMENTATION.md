@@ -150,3 +150,25 @@ agent, failure recovery, and communication approval.
 
 No schema change was needed: actions, communications, invoice drafts, agent
 runs, and run events already represent the required durable state.
+
+## Product interaction and workflow coherence — 2026-11-18
+
+1. Conversation rendering reconciles immutable message-time execution with
+   current action/communication state. One deduplicated current card supplies
+   the present status and focused action.
+2. Communication actions are the single review route. Job Workspace and Today
+   render compact prepared-work cards and no longer mount a second editor.
+3. Hold preference is metadata on the shared conflict action. Both jobs and
+   Calendar read the same preference without converting or releasing a hold;
+   conflict reevaluation preserves it.
+4. Invoice editing and approval use the existing draft/action. Approval changes
+   only internal review state and never advances `invoiceStatus` to sent.
+5. The canonical job projection supplies the scannable situation summary and
+   fact set, including accepted field information state where available.
+6. Agent tool context carries the durable instruction timestamp. Relative
+   condition dates are resolved once in the business timezone and persisted for
+   retries, refreshes, and later review.
+
+Validation passed with `pnpm check`, `pnpm build`, and 26/26 desktop/mobile
+Playwright scenarios. The E2E reset target is derived safely from
+`DATABASE_URL`; the retained database was not mutated.

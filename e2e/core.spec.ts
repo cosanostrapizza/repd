@@ -46,8 +46,73 @@ test("jobs share canonical attention and invoice preparation is idempotent", asy
   ).toContainText("On track");
   await page.goto("/jobs/job_acme");
   await page.getByRole("link", { name: "Review invoice" }).last().click();
-  await expect(page.locator(".invoice-preview")).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", { name: "Review invoice draft" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Bill to")).toHaveValue("Acme Studios");
+  await expect(page.getByLabel("Payment terms")).toHaveValue("Net 30");
   await expect(page.getByText(/has not been issued or sent/i)).toBeVisible();
+});
+
+test("scheduling preference does not confirm or release either hold", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Review next step" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Which job should take priority?" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Prefer Nike Run Division — SS27" })
+    .click();
+  await expect(page.getByText("Current priority preference")).toBeVisible();
+  await expect(page.getByText(/no booking has been confirmed/i)).toBeVisible();
+  await page.goto("/jobs/job_nike");
+  await expect(page.locator(".detail-meta")).toContainText("1st hold");
+  await expect(
+    page.getByText(/Nike Run Division.*scheduling priority/i),
+  ).toBeVisible();
+  await page.goto("/jobs/job_editorial");
+  await expect(page.locator(".detail-meta")).toContainText("2nd hold");
+  await expect(
+    page.getByText(/Nike Run Division.*scheduling priority/i),
+  ).toBeVisible();
+  await page.goto("/calendar?view=agenda");
+  await expect(page.getByText("Priority preference")).toBeVisible();
+  await page.getByRole("link", { name: "Review conflict" }).first().click();
+  await page
+    .locator(".hold-decision")
+    .filter({ hasText: "Vogue New Voices" })
+    .getByRole("button", { name: "Release this hold" })
+    .click();
+  await page.goto("/jobs/job_editorial");
+  await expect(page.locator(".detail-meta")).toContainText("Released");
+  await page.goto("/jobs/job_nike");
+  await expect(page.locator(".detail-meta")).toContainText("1st hold");
+  await page.goto("/calendar?view=agenda");
+  await expect(page.getByText(/Scheduling conflict/)).toHaveCount(0);
+});
+
+test("invoice edits persist and approval never issues or sends", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Review invoice" }).click();
+  await expect(page.locator(".invoice-editor")).toHaveCount(1);
+  await expect(page.locator(".invoice-preview")).toHaveCount(0);
+  await page.getByLabel("Payment terms").fill("Net 45");
+  await expect(
+    page.getByRole("button", { name: "Save edits before approval" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Save invoice draft" }).click();
+  await expect(page.getByText(/Invoice draft saved/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Payment terms")).toHaveValue("Net 45");
+  await page.getByRole("button", { name: "Approve invoice draft" }).click();
+  await expect(page.getByText(/has not been issued or sent/i)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Not issued or sent")).toBeVisible();
+  await expect(page.getByText("Approved", { exact: true })).toBeVisible();
 });
 
 test("the universal agent resolves cross-job context and shows real execution steps", async ({
@@ -180,6 +245,11 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
       .first(),
   ).toBeVisible();
   await expect(
+    page.getByRole("link", { name: "Review reply" }).last(),
+  ).toBeVisible();
+  await expect(page.getByLabel("Draft")).toHaveCount(0);
+  await page.getByRole("link", { name: "Review reply" }).last().click();
+  await expect(
     page.getByRole("heading", { name: "Reply to the producer" }),
   ).toBeVisible();
   await expect(page.getByLabel("Draft")).toContainText(
@@ -200,6 +270,7 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await page.getByRole("button", { name: "Approve draft" }).click();
   await expect(page.getByText("Approved for handoff").first()).toBeVisible();
   await page.getByRole("button", { name: "I sent it" }).click();
+  await page.getByRole("link", { name: /View New Balance Campaign/ }).click();
   await expect(
     page.getByRole("heading", { name: /Waiting on others/ }),
   ).toBeVisible();
@@ -281,9 +352,12 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(
     page.getByText("Decide whether to commit to the treatment deadline"),
   ).toHaveCount(0);
+  await expect(page.getByLabel("Draft")).toHaveCount(0);
+  await page.getByRole("link", { name: "Review reply" }).last().click();
   await expect(
     page.getByRole("heading", { name: "Reply to the producer" }),
   ).toBeVisible();
+  await expect(page.getByText(/“Tomorrow” was anchored to/)).toBeVisible();
   await expect(page.getByLabel("Draft")).toContainText(
     "I can meet the 2026-11-23 treatment deadline provided that the promised deck arrives tomorrow and can be reviewed.",
   );
@@ -397,6 +471,8 @@ test("declining an opportunity prepares a decline without commercial questions",
     .selectOption("decline");
   await page.getByLabel("None known").check();
   await page.getByRole("button", { name: "Continue to reply" }).click();
+  await expect(page.getByLabel("Draft")).toHaveCount(0);
+  await page.getByRole("link", { name: "Review reply" }).last().click();
   await expect(page.getByLabel("Draft")).toContainText("pass this time");
   await expect(page.getByLabel("Draft")).not.toContainText(
     "Does the photography budget include usage",

@@ -427,13 +427,11 @@ export async function saveCommunication(
     body = value(formData, "body"),
     toEmail = value(formData, "toEmail") || null;
   if (!subject || !body) return { error: "Subject and message are required." };
-  const treatmentPayload = (
-    row.action?.payload as {
-      treatmentDecision?:
-        "commit_after_deck" | "need_deck_first" | "cannot_commit";
-      treatmentCondition?: string;
-    } | null
-  );
+  const treatmentPayload = row.action?.payload as {
+    treatmentDecision?:
+      "commit_after_deck" | "need_deck_first" | "cannot_commit";
+    treatmentCondition?: string;
+  } | null;
   const treatmentDecision = treatmentPayload?.treatmentDecision;
   if (
     treatmentDecision &&
@@ -474,6 +472,9 @@ export async function saveCommunication(
       })
       .where(eq(actions.id, row.action.id));
   revalidatePath(`/actions/${row.action?.id}`);
+  revalidatePath(`/jobs/${row.communication.jobId}`);
+  revalidatePath("/");
+  revalidatePath("/agent");
   return { success: "Draft saved. It still requires approval." };
 }
 
@@ -495,13 +496,11 @@ export async function reviseCommunication(
         "warm" | "direct" | "concise",
       instruction: value(formData, "instruction"),
     });
-    const treatmentPayload = (
-      row.action?.payload as {
-        treatmentDecision?:
-          "commit_after_deck" | "need_deck_first" | "cannot_commit";
-        treatmentCondition?: string;
-      } | null
-    );
+    const treatmentPayload = row.action?.payload as {
+      treatmentDecision?:
+        "commit_after_deck" | "need_deck_first" | "cannot_commit";
+      treatmentCondition?: string;
+    } | null;
     const treatmentDecision = treatmentPayload?.treatmentDecision;
     if (
       treatmentDecision &&
@@ -557,13 +556,11 @@ export async function approveCommunication(
   const communicationId = value(formData, "communicationId");
   const row = await ownedCommunication(ctx.workspaceId, communicationId);
   if (!row?.action) return { error: "Draft not found." };
-  const treatmentPayload = (
-    row.action.payload as {
-      treatmentDecision?:
-        "commit_after_deck" | "need_deck_first" | "cannot_commit";
-      treatmentCondition?: string;
-    } | null
-  );
+  const treatmentPayload = row.action.payload as {
+    treatmentDecision?:
+      "commit_after_deck" | "need_deck_first" | "cannot_commit";
+    treatmentCondition?: string;
+  } | null;
   const treatmentDecision = treatmentPayload?.treatmentDecision;
   if (
     treatmentDecision &&
@@ -607,6 +604,9 @@ export async function approveCommunication(
   });
   revalidatePath(`/actions/${row.action.id}`);
   revalidatePath(`/jobs/${row.communication.jobId}`);
+  revalidatePath("/");
+  revalidatePath("/jobs");
+  revalidatePath("/agent");
   return { success: "Draft approved. It has not been sent." };
 }
 
@@ -846,4 +846,61 @@ export async function saveInvoiceDraft(
   revalidatePath(`/actions/${draft.actionId}`);
   revalidatePath(`/jobs/${draft.jobId}`);
   return { success: "Invoice draft saved. Nothing was issued or sent." };
+}
+
+export async function approveInvoiceDraft(
+  _: AgentFormState,
+  formData: FormData,
+): Promise<AgentFormState> {
+  const ctx = await requireContext();
+  const draftId = value(formData, "draftId");
+  const [row] = await db
+    .select({ draft: invoiceDrafts, action: actions })
+    .from(invoiceDrafts)
+    .innerJoin(actions, eq(invoiceDrafts.actionId, actions.id))
+    .where(
+      and(
+        eq(invoiceDrafts.id, draftId),
+        eq(invoiceDrafts.workspaceId, ctx.workspaceId),
+        eq(actions.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!row) return { error: "Invoice draft not found." };
+  const missing = [
+    !row.draft.billingName && "billing client",
+    !row.draft.paymentTerms && "payment terms",
+    !row.draft.lineItems.length && "line item",
+  ].filter(Boolean);
+  if (missing.length)
+    return { error: `Complete ${missing.join(", ")} before approval.` };
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(invoiceDrafts)
+      .set({ status: "approved", updatedAt: now })
+      .where(eq(invoiceDrafts.id, draftId));
+    await tx
+      .update(actions)
+      .set({
+        status: "approved",
+        approvedAt: now,
+        approvedByUserId: ctx.userId,
+        updatedAt: now,
+      })
+      .where(eq(actions.id, row.action.id));
+    await tx.insert(actionEvents).values({
+      id: id("aev"),
+      workspaceId: ctx.workspaceId,
+      actionId: row.action.id,
+      type: "invoice_approved",
+      fromStatus: row.action.status,
+      toStatus: "approved",
+      metadata: { draftId, issued: false, sent: false },
+    });
+  });
+  revalidatePath(`/actions/${row.action.id}`);
+  revalidatePath(`/jobs/${row.draft.jobId}`);
+  revalidatePath("/");
+  return { success: "Invoice draft approved. It has not been issued or sent." };
 }

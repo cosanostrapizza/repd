@@ -2,6 +2,26 @@
 
 Agent-native workspace redesign — 2026-11-18
 
+## Product interaction coherence checkpoint
+
+- Ask Repd preserves historical messages and adds one current-outcome card per
+  linked operation, so a past failure can coexist with a reply that is now
+  ready, approved, handed off, sent, or still failed.
+- Prepared communications stay compact in Job Workspace and open the existing
+  action-backed focused review. Dirty edits block approval and warn on exit.
+- Shared hold conflicts can record an internal priority preference without
+  changing either hold, booking status, or an external record. Confirmation
+  and release remain separate explicit commands.
+- Invoice review is one editable surface. Saving and internal approval persist;
+  numbering, issuance, sending, and payment remain outside those actions.
+- Job situations use a short summary plus compact source-aware facts.
+- New relative-date instructions are anchored to the durable instruction
+  timestamp and stored with the treatment dependency/action. Historical records
+  without sufficient context are not rewritten.
+- Isolated database reset now honors `DATABASE_URL` while refusing non-E2E or
+  out-of-`.repd` targets. The retained live database was not reset, reseeded,
+  migrated, or mutated during this milestone.
+
 ## Product reality
 
 Repd is a job-centric operating workspace for independent commercial
@@ -164,6 +184,15 @@ source and the clean candidate, but the corrupt original cannot provide an
 independent SQL-level snapshot. Keep both the original-aside directory and the
 verified backup until the activated candidate has passed a user acceptance
 window.
+
+## Interaction-coherence validation — 2026-11-18
+
+- `pnpm check`: passed (45 tests across 12 files).
+- `pnpm build`: passed on Next.js 16.4.6.
+- `pnpm test:e2e`: passed 26/26 desktop and mobile scenarios.
+- Hands-on QA against the retained workspace confirmed the original New
+  Balance failure remains visible beside the current “Reply ready for review”
+  outcome and focused review. No retained-record mutation was performed.
 
 ## Composable agent checkpoint
 
