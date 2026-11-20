@@ -64,11 +64,6 @@ export function JobHeader({
   return (
     <header className="job-document-header">
       <div className="job-document-header-inner">
-        <nav className="job-breadcrumb" aria-label="Breadcrumb">
-          <Link href="/jobs">Jobs</Link>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page">{job.title}</span>
-        </nav>
         <div className="job-document-title-row">
           <div>
             <h1>{job.title}</h1>

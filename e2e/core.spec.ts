@@ -76,6 +76,80 @@ test("desktop navigation collapses, persists, and responds to the shortcut", asy
   ).toHaveAttribute("aria-current", "page");
 });
 
+test("workspace navigation keeps one shell, contextual breadcrumbs, and browser history", async ({
+  page,
+}) => {
+  await signIn(page);
+  const surface = page.getByTestId("workspace-surface");
+  await surface.evaluate((element) => {
+    element.setAttribute("data-shell-instance", "persistent");
+  });
+
+  await openMobileNavigation(page);
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(surface).toHaveAttribute("data-shell-instance", "persistent");
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toHaveText(
+    "Jobs",
+  );
+
+  await page.locator('a.list-row[href="/jobs/job_acme"]').click();
+  await expect(surface).toHaveAttribute("data-shell-instance", "persistent");
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(breadcrumb.getByRole("link", { name: "Jobs" })).toHaveAttribute(
+    "href",
+    "/jobs",
+  );
+  await expect(breadcrumb).toContainText("Acme Fall Lookbook");
+
+  await page.getByRole("link", { name: "Review invoice" }).last().click();
+  await expect(breadcrumb).toContainText("Acme Fall Lookbook");
+  await expect(breadcrumb).toContainText("Review invoice draft");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/jobs\/job_acme$/);
+  await expect(breadcrumb).toContainText("Acme Fall Lookbook");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/jobs\/job_acme$/);
+});
+
+test("the agent launcher is a persistent outer-canvas utility", async ({
+  page,
+}) => {
+  await signIn(page);
+  const launcher = page
+    .getByLabel("Global utilities")
+    .getByRole("button", { name: "Ask Repd" });
+  await expect(launcher).toBeVisible();
+  await expect(page.locator(".desktop-sidebar .nav-agent-button")).toHaveCount(
+    0,
+  );
+  await launcher.click();
+  await expect(page.getByRole("dialog", { name: "Ask Repd" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(launcher).toBeFocused();
+});
+
+test("Today restores its scroll context after a focused review", async ({
+  page,
+}) => {
+  await signIn(page);
+  const viewport = page.locator(".workspace-scroll");
+  const originalScroll = await viewport.evaluate((element) => {
+    element.scrollTop = 240;
+    return element.scrollTop;
+  });
+  expect(originalScroll).toBeGreaterThan(50);
+
+  await page.getByRole("link", { name: "Review invoice" }).first().click();
+  await expect(page).toHaveURL(/\/actions\//);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThanOrEqual(originalScroll - 2);
+});
+
 test("mobile navigation is an overlay and Contacts preserves legacy links", async ({
   page,
 }) => {
@@ -190,7 +264,6 @@ test("the universal agent resolves cross-job context and shows real execution st
   page,
 }) => {
   await signIn(page);
-  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   await page
     .getByPlaceholder(/Ask Repd/)
@@ -218,7 +291,6 @@ test("the universal agent resolves cross-job context and shows real execution st
     "Nike Run Division",
   );
   await page.keyboard.press("Escape");
-  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   await expect(
     page.getByText("What's holding up the Nike Spring job?", { exact: true }),
@@ -259,7 +331,6 @@ test("the mobile agent is a dismissible full-screen dialog", async ({
     "Mobile agent layout only",
   );
   await signIn(page);
-  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   const dialog = page.getByRole("dialog", { name: "Ask Repd" });
   await expect(dialog).toBeVisible();
@@ -268,9 +339,7 @@ test("the mobile agent is a dismissible full-screen dialog", async ({
   await expect(page.getByLabel("Instruction to Repd")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Open navigation" }),
-  ).toBeFocused();
+  await expect(page.getByRole("button", { name: "Ask Repd" })).toBeFocused();
 });
 
 test("one workspace cannot read another workspace job", async ({
@@ -478,7 +547,6 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   ).toBeVisible();
   await expect(page.getByText("Review the producer’s update")).toHaveCount(0);
   await page.goto("/");
-  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   await page
     .getByPlaceholder(/Ask Repd/)

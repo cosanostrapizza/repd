@@ -4358,3 +4358,229 @@ a.timeline-row:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* Persistent application canvas and inset workspace */
+.app-shell {
+  height: 100dvh;
+  min-height: 0;
+  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 38px;
+  gap: 6px 8px;
+  padding: 8px;
+  overflow: hidden;
+  background: #ebeae5;
+}
+
+.app-shell.sidebar-is-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+html.agent-panel-open .app-shell {
+  grid-template-columns: 208px minmax(0, 1fr) 430px;
+}
+
+html.agent-panel-open .app-shell.sidebar-is-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr) 430px;
+}
+
+html.agent-panel-wide .app-shell {
+  grid-template-columns: 208px minmax(0, 1fr) min(560px, 42vw);
+}
+
+html.agent-panel-wide .app-shell.sidebar-is-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr) min(560px, 42vw);
+}
+
+.sidebar {
+  grid-row: 1 / -1;
+  position: relative;
+  top: auto;
+  height: auto;
+  min-height: 0;
+  padding: 8px 8px 2px;
+  border: 0;
+  background: transparent;
+}
+
+.main {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #d6d5cf;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(32, 33, 31, 0.03);
+}
+
+html.agent-panel-open .main,
+html.agent-panel-wide .main {
+  grid-row: 1 / -1;
+}
+
+.topbar {
+  display: none;
+}
+
+.workspace-header {
+  min-height: 42px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: rgba(253, 253, 251, 0.96);
+}
+
+.workspace-breadcrumbs,
+.workspace-breadcrumbs > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.workspace-breadcrumbs {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workspace-breadcrumbs > span:last-child {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.workspace-breadcrumbs a:hover {
+  color: var(--ink);
+}
+
+.workspace-breadcrumbs i {
+  color: #aaa9a3;
+  font-style: normal;
+}
+
+.workspace-breadcrumbs [aria-current="page"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 16px;
+}
+
+.global-utility {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
+  justify-self: end;
+  padding-right: 2px;
+}
+
+.global-agent-launcher {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #3d403b;
+  border-radius: 9px;
+  background: #30322f;
+  color: white;
+  box-shadow: 0 4px 12px rgba(30, 31, 28, 0.16);
+}
+
+.global-agent-launcher:hover {
+  background: #41443f;
+}
+
+.global-agent-launcher[data-tooltip]::after {
+  right: calc(100% + 8px);
+  left: auto;
+}
+
+html.agent-panel-open .global-utility,
+html.agent-panel-wide .global-utility {
+  display: none;
+}
+
+.agent-drawer {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  height: 100%;
+  max-height: none;
+  border: 1px solid #d6d5cf;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) and (min-width: 901px) {
+  html.agent-panel-open .app-shell,
+  html.agent-panel-wide .app-shell {
+    grid-template-columns: 52px minmax(0, 1fr) min(400px, 38vw);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell,
+  html.agent-panel-open .app-shell,
+  html.agent-panel-wide .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    gap: 0;
+  }
+
+  .main,
+  html.agent-panel-open .main,
+  html.agent-panel-wide .main {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .topbar {
+    min-height: 50px;
+    display: flex;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+
+  .workspace-header {
+    min-height: 38px;
+    padding-inline: 16px;
+  }
+
+  .global-utility {
+    position: fixed;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    z-index: 20;
+    padding: 0;
+  }
+
+  html.agent-panel-open .global-utility,
+  html.agent-panel-wide .global-utility {
+    display: none;
+  }
+
+  .agent-drawer {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, ChevronLeft, ChevronRight, LogOut, Menu, X } from "lucide-react";
 import { AgentPanel } from "@/components/agent/agent-panel";
 import { AppNav, UtilityNav } from "@/components/app-nav";
+import { WorkspaceViewport } from "@/components/shell/workspace-viewport";
 import { logout } from "@/lib/server-actions";
 
 const sidebarPreferenceKey = "repd:sidebar-collapsed";
@@ -43,6 +44,7 @@ export function WorkspaceShell({
   const [preferenceReady, setPreferenceReady] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const mobileTrigger = useRef<HTMLButtonElement>(null);
+  const agentTrigger = useRef<HTMLButtonElement>(null);
   const mobileClose = useRef<HTMLButtonElement>(null);
   const mobilePanel = useRef<HTMLElement>(null);
 
@@ -167,16 +169,6 @@ export function WorkspaceShell({
         onNavigate={mobile ? () => setMobileOpen(false) : undefined}
       />
       <div className="sidebar-utilities">
-        <button
-          type="button"
-          className="nav-agent-button"
-          onClick={(event) => openAgent(event.currentTarget)}
-          aria-label={isCollapsed ? "Ask Repd" : undefined}
-          data-tooltip={isCollapsed ? "Ask Repd" : undefined}
-        >
-          <Bot aria-hidden size={17} strokeWidth={1.8} />
-          <span>Ask Repd</span>
-        </button>
         <UtilityNav
           collapsed={isCollapsed}
           onNavigate={mobile ? () => setMobileOpen(false) : undefined}
@@ -208,7 +200,7 @@ export function WorkspaceShell({
       <aside className="sidebar desktop-sidebar">
         {sidebarContent(collapsed)}
       </aside>
-      <main className="main">
+      <main className="main" data-testid="workspace-surface">
         <header className="topbar">
           <button
             ref={mobileTrigger}
@@ -226,15 +218,8 @@ export function WorkspaceShell({
             </span>
             <span className="brand-wordmark">repd</span>
           </div>
-          <span
-            className="topbar-shortcut"
-            aria-label="Ask Repd with Command or Control plus K"
-          >
-            Ask Repd <kbd>⌘/Ctrl</kbd>
-            <kbd>K</kbd>
-          </span>
         </header>
-        {children}
+        <WorkspaceViewport>{children}</WorkspaceViewport>
       </main>
       {mobileOpen && (
         <div className="mobile-nav-layer">
@@ -255,6 +240,18 @@ export function WorkspaceShell({
           </aside>
         </div>
       )}
+      <div className="global-utility" aria-label="Global utilities">
+        <button
+          ref={agentTrigger}
+          type="button"
+          className="global-agent-launcher"
+          aria-label="Ask Repd"
+          data-tooltip="Ask Repd (⌘/Ctrl K)"
+          onClick={(event) => openAgent(event.currentTarget)}
+        >
+          <Bot aria-hidden size={17} strokeWidth={1.8} />
+        </button>
+      </div>
       <AgentPanel
         initialThreadId={initialThreadId}
         initialMessages={initialMessages}

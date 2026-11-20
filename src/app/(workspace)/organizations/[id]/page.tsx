@@ -47,7 +47,7 @@ export default async function OrganizationPage({
       ),
   ]);
   return (
-    <div className="content">
+    <div className="content" data-workspace-record-title={org.name}>
       <div className="page-head">
         <div>
           <p className="eyebrow">{org.kind.replaceAll("_", " ")}</p>

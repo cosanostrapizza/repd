@@ -60,7 +60,7 @@ export default async function PersonPage({
       ({ affiliation }) => affiliation.isPrimary && !affiliation.endedOn,
     ) ?? links.find(({ affiliation }) => !affiliation.endedOn);
   return (
-    <div className="content">
+    <div className="content" data-workspace-record-title={person.name}>
       <div className="page-head">
         <div>
           <p className="eyebrow">Person</p>

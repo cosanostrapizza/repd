@@ -108,7 +108,16 @@ export default async function ReviewPage({
     };
   });
   return (
-    <div className="content">
+    <div
+      className="content"
+      data-workspace-current-label={
+        target
+          ? `${extraction.producerName.value ?? "The producer"} replied`
+          : (extraction.jobTitle.value ?? "Review inquiry")
+      }
+      data-workspace-job-title={target?.title}
+      data-workspace-job-href={target ? `/jobs/${target.id}` : undefined}
+    >
       <div className="page-head">
         <div>
           <p className="eyebrow">

@@ -22,7 +22,12 @@ export default async function JobResponsePage({
   if (!job) notFound();
   const configuration = getAIConfiguration();
   return (
-    <div className="content narrow-content">
+    <div
+      className="content narrow-content"
+      data-workspace-current-label="Producer update"
+      data-workspace-job-title={job.title}
+      data-workspace-job-href={`/jobs/${job.id}`}
+    >
       <div className="page-head">
         <div>
           <p className="eyebrow">Incoming information · {job.title}</p>

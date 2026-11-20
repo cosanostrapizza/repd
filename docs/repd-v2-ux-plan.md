@@ -1,7 +1,10 @@
 # Repd v2 UX audit and implementation plan
 
-**Status:** Architecture approved; planning only, implementation not started  
-**Audit date:** 2026-11-18  
+**Status:** Core UX implemented; persistent application canvas refinement completed
+
+**Audit date:** 2026-11-18
+
+**Last implementation update:** 2026-11-19
 **North star:** Repd should feel like someone competent has already been working on your behalf before you even open the application.
 
 ## 1. Executive summary
@@ -36,6 +39,52 @@ The following decisions are binding for implementation:
 - The unified timeline shows meaningful business events by default. Historical attribution is conservative: records without reliable actor linkage use neutral source/system language.
 - Deterministic reevaluation remains synchronous, server-side, and idempotent. It runs after relevant mutations rather than during page reads. No background worker is added.
 - The notification bell is confirmed inert in the current shell and will be removed.
+
+### Persistent application canvas implementation (2026-11-19)
+
+The shell and navigation refinement is complete. The implementation deliberately
+keeps the existing `(workspace)` App Router layout as the persistent boundary;
+it does not add a custom router, client business-state store, or new route
+hierarchy.
+
+Architectural decisions implemented in this pass:
+
+- `WorkspaceShell` now renders a warm neutral outer canvas, a visually integrated
+  collapsible sidebar, and a bordered 12 px inset workspace surface. The shell,
+  sidebar, agent panel, and global utility remain mounted while App Router client
+  navigation replaces route content.
+- `WorkspaceViewport` owns the compact workspace breadcrumb header and the one
+  independent route-content scroll container. Static routes are mapped to
+  workflow labels; dynamic job, action, inquiry-review, person, and organization
+  routes expose only the labels needed for contextual breadcrumbs through DOM
+  data attributes. Canonical URLs are unchanged.
+- Internal navigation continues to use Next.js `Link`. A restrained workspace
+  `loading.tsx` keeps the canvas and shell interactive while dynamic route data is
+  pending. No transition animation or artificial delay was added.
+- Scroll position is stored per pathname and query string in session storage
+  immediately before link and browser-history navigation, then restored after
+  the destination route commits. This preserves Today/list context across
+  focused review navigation and naturally preserves URL-backed filter/sort state.
+- Ask Repd now has one global launcher in the bottom-right utility area of the
+  outer canvas. The sidebar and old header shortcut are removed; the existing
+  `Mod+K`, contextual job/field capture, panel session, approval logic, mobile
+  modal behavior, and focus restoration remain unchanged.
+- Desktop uses the inset canvas and utility strip, tablet retains manual sidebar
+  collapse and agent reflow, and mobile switches to a full-width single-scroll
+  workspace with overlay navigation and a persistent agent launcher.
+
+Regression coverage now verifies shell identity across Jobs → Job → Review,
+workflow breadcrumbs, Back/Forward, Today scroll restoration, the single global
+agent launcher and focus lifecycle, direct dynamic routes through existing
+coverage, and desktop/mobile navigation behavior.
+
+Known limitations are intentionally narrow: breadcrumb labels for dynamic routes
+hydrate from the rendered route context (with generic labels during the shortest
+loading interval), scroll restoration is tab-scoped rather than account-scoped,
+and the current Jobs page has no filters or sort controls to preserve beyond its
+URL. Cold direct visits still authenticate and render server data before the
+workspace layout is available; warm client navigation retains the persistent
+shell and loading boundary.
 
 ## 2. Audit scope and sources
 

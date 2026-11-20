@@ -164,7 +164,7 @@ export function AgentPanel({
       opener ??
       (active && active !== document.body
         ? active
-        : document.querySelector<HTMLElement>(".nav-agent-button"));
+        : document.querySelector<HTMLElement>(".global-agent-launcher"));
     captureContext(opener);
     setOpen(true);
   }

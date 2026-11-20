@@ -62,6 +62,8 @@ export default async function JobDetail({
         className="content job-document"
         data-agent-job-id={workspaceState.job.id}
         data-agent-job-title={workspaceState.job.title}
+        data-workspace-job-title={workspaceState.job.title}
+        data-workspace-job-href={`/jobs/${workspaceState.job.id}`}
       >
         {justUpdated && (
           <div className="update-notice" role="status">

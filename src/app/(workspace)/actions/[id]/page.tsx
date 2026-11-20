@@ -52,7 +52,12 @@ export default async function ActionWorkspace({
       ? "Repd prepared this internal invoice draft from the recorded job terms. Review its actual contents below; it has not been issued or sent."
       : action.explanation;
   const header = (
-    <header className="detail-head">
+    <header
+      className="detail-head"
+      data-workspace-current-label={pageTitle}
+      data-workspace-job-title={job?.title}
+      data-workspace-job-href={job ? `/jobs/${job.id}` : undefined}
+    >
       <div className="detail-head-inner">
         <div className="action-workspace-head">
           <div>
