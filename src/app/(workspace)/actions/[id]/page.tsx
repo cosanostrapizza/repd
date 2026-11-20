@@ -42,7 +42,7 @@ export default async function ActionWorkspace({
   if (!row) notFound();
   const { action, job, person } = row;
   if (job && ["advance_inquiry", "treatment_commitment"].includes(action.kind))
-    redirect(`/jobs/${job.id}#coordination`);
+    redirect(`/jobs/${job.id}#next-steps`);
   const pageTitle =
     action.kind === "invoice" && action.status !== "open"
       ? "Review invoice draft"

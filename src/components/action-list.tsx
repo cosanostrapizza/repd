@@ -89,7 +89,7 @@ export function ActionList({
                     "advance_inquiry",
                     "treatment_commitment",
                   ].includes(a.kind)
-                    ? `/jobs/${a.jobId}#coordination`
+                    ? `/jobs/${a.jobId}#next-steps`
                     : `/actions/${a.id}`
                 }
               >

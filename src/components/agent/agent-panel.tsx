@@ -54,6 +54,13 @@ export function AgentPanel({
     if (state.response) form.current?.reset();
   }, [state.response]);
   useEffect(() => {
+    function handleOpen() {
+      setOpen(true);
+    }
+    window.addEventListener("repd:open-agent", handleOpen);
+    return () => window.removeEventListener("repd:open-agent", handleOpen);
+  }, []);
+  useEffect(() => {
     if (expanded || path === "/agent") return;
     document.documentElement.classList.toggle("agent-panel-open", open);
     document.documentElement.classList.toggle("agent-panel-wide", open && wide);

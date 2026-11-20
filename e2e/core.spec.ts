@@ -10,6 +10,12 @@ async function signIn(page: import("@playwright/test").Page) {
   ).toBeVisible();
 }
 
+async function openMobileNavigation(page: import("@playwright/test").Page) {
+  if ((page.viewportSize()?.width ?? 1000) <= 900) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  }
+}
+
 test("signed-out users are redirected", async ({ page }) => {
   await page.goto("/jobs");
   await expect(page).toHaveURL(/\/login/);
@@ -22,8 +28,48 @@ test("demo workspace presents real actions and conflicts", async ({ page }) => {
   await expect(
     page.getByText("Invoice ready for review").first(),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Calendar" }).first().click();
+  await openMobileNavigation(page);
+  await page.getByRole("link", { name: "Calendar" }).click();
   await expect(page.getByText(/Scheduling conflict/)).toBeVisible();
+});
+
+test("desktop navigation collapses, persists, and responds to the shortcut", async ({
+  page,
+}) => {
+  test.skip(
+    (page.viewportSize()?.width ?? 0) <= 900,
+    "Desktop navigation only",
+  );
+  await signIn(page);
+  const shell = page.locator(".app-shell");
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await expect(shell).toHaveClass(/sidebar-is-collapsed/);
+  await page.reload();
+  await expect(shell).toHaveClass(/sidebar-is-collapsed/);
+  await page.keyboard.press("Control+\\");
+  await expect(shell).not.toHaveClass(/sidebar-is-collapsed/);
+  await page.getByRole("link", { name: "Jobs" }).click();
+  await expect(page.getByRole("link", { name: "Jobs" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+});
+
+test("mobile navigation is an overlay and Contacts preserves legacy links", async ({
+  page,
+}) => {
+  test.skip(
+    (page.viewportSize()?.width ?? 1000) > 900,
+    "Mobile navigation only",
+  );
+  await signIn(page);
+  await openMobileNavigation(page);
+  await expect(page.getByLabel("Mobile navigation")).toBeVisible();
+  await page.getByRole("link", { name: "Contacts" }).click();
+  await expect(page.getByRole("heading", { name: "Contacts" })).toBeVisible();
+  await page.goto("/people");
+  await expect(page).toHaveURL(/\/contacts$/);
+  await expect(page.getByRole("heading", { name: "Contacts" })).toBeVisible();
 });
 
 test("jobs share canonical attention and invoice preparation is idempotent", async ({

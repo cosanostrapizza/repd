@@ -1,59 +1,129 @@
 "use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BriefcaseBusiness,
   CalendarDays,
-  Bot,
+  ContactRound,
+  Settings,
   SunMedium,
-  UsersRound,
+  type LucideIcon,
 } from "lucide-react";
 
-const links = [
+type NavigationItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  matches?: (path: string) => boolean;
+};
+
+const primary: NavigationItem[] = [
   { href: "/", label: "Today", icon: SunMedium },
   { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/people", label: "Relationships", icon: UsersRound },
-  { href: "/agent", label: "Ask Repd", icon: Bot },
 ];
-export function AppNav() {
+
+const secondary: NavigationItem[] = [
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
+  {
+    href: "/contacts",
+    label: "Contacts",
+    icon: ContactRound,
+    matches: (path) =>
+      path === "/contacts" ||
+      path.startsWith("/people/") ||
+      path.startsWith("/organizations/"),
+  },
+];
+
+const utilities: NavigationItem[] = [
+  { href: "/settings", label: "Settings", icon: Settings },
+];
+
+function isActive(path: string, item: NavigationItem) {
+  if (item.matches?.(path)) return true;
+  if (item.href === "/") return path === "/";
+  return path === item.href || path.startsWith(`${item.href}/`);
+}
+
+function NavItem({
+  item,
+  collapsed,
+  onNavigate,
+}: {
+  item: NavigationItem;
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
   const path = usePathname();
+  const Icon = item.icon;
+  const active = isActive(path, item);
+
   return (
-    <nav className="nav" aria-label="Primary">
-      {links.map(({ href, label, icon: Icon }) => (
-        <Link
-          key={href}
-          href={href}
-          className={
-            path === href || (href !== "/" && path.startsWith(href))
-              ? "active"
-              : ""
-          }
-        >
-          <Icon aria-hidden />
-          {label}
-        </Link>
-      ))}
+    <Link
+      href={item.href}
+      className={active ? "active" : ""}
+      aria-current={active ? "page" : undefined}
+      aria-label={collapsed ? item.label : undefined}
+      data-tooltip={collapsed ? item.label : undefined}
+      onClick={onNavigate}
+    >
+      <Icon aria-hidden size={17} strokeWidth={1.8} />
+      <span>{item.label}</span>
+    </Link>
+  );
+}
+
+export function AppNav({
+  collapsed = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav className="nav" aria-label="Workspace navigation">
+      <div className="nav-section nav-primary">
+        {primary.map((item) => (
+          <NavItem
+            item={item}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+            key={item.href}
+          />
+        ))}
+      </div>
+      <div className="nav-section nav-secondary">
+        <p className="nav-section-label">Workspace</p>
+        {secondary.map((item) => (
+          <NavItem
+            item={item}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+            key={item.href}
+          />
+        ))}
+      </div>
     </nav>
   );
 }
-export function MobileNav() {
-  const path = usePathname();
+
+export function UtilityNav({
+  collapsed = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
   return (
-    <nav className="mobile-nav" aria-label="Mobile primary">
-      {links.map(({ href, label, icon: Icon }) => (
-        <Link
-          key={href}
-          href={href}
-          className={
-            path === href || (href !== "/" && path.startsWith(href))
-              ? "active"
-              : ""
-          }
-        >
-          <Icon aria-hidden />
-          {label}
-        </Link>
+    <nav className="nav utility-nav" aria-label="Account navigation">
+      {utilities.map((item) => (
+        <NavItem
+          item={item}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+          key={item.href}
+        />
       ))}
     </nav>
   );
