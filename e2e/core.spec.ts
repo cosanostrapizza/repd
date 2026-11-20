@@ -304,14 +304,10 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(page.getByText("December 16, 2026").first()).toBeVisible();
   await expect(page.getByText("December 17, 2026").first()).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Where things stand" }),
-  ).toBeVisible();
-  await expect(
     page.getByRole("heading", { name: "Who has the next move" }),
   ).toBeVisible();
   await expect(page.getByText("Current objective")).toHaveCount(0);
   await expect(page.getByText("Confirm shoot date")).toHaveCount(0);
-  await page.getByText("People and organizations").click();
   await expect(
     page.locator(".person-record").filter({ hasText: "Sarah" }),
   ).toBeVisible();
@@ -383,7 +379,6 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(
     page.locator(".record-row").filter({ hasText: "December 17, 2026" }),
   ).toContainText("Released");
-  await page.getByText("People and organizations").click();
   await expect(
     page.locator(".person-record").filter({ hasText: "Sarah" }),
   ).toHaveCount(1);
@@ -465,7 +460,6 @@ test("the agent composes a usage question and one record-scoped follow-up", asyn
   await expect(page.getByText("Prepared the producer reply")).toBeVisible();
   await expect(page.getByText("Created the dated follow-up")).toBeVisible();
   await page.getByRole("link", { name: "Open job" }).click();
-  await page.getByText("Questions, communications, and artifacts").click();
   await expect(page.getByText("New Balance usage clarification")).toHaveCount(
     1,
   );
@@ -499,10 +493,9 @@ test("producer response proposes and reconciles an answer", async ({
       .locator(".fact-row strong")
       .filter({ hasText: "Worldwide digital and social, 12 months" }),
   ).toBeVisible();
-  await page.getByText("Activity and sources").click();
   await expect(
     page
-      .locator(".disclosure-body")
+      .locator(".job-timeline")
       .getByText(/Accepted a producer update/)
       .first(),
   ).toBeVisible();

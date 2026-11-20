@@ -132,7 +132,7 @@ export async function submitJobResponse(
       } catch {
         // Preserve the review path when automatic incorporation cannot finish.
       }
-      if (incorporated) redirect(`/jobs/${jobId}?updated=1#coordination`);
+      if (incorporated) redirect(`/jobs/${jobId}?updated=1#next-steps`);
     }
   }
   redirect(`/inquiries/review/${reviewId}`);
@@ -251,7 +251,7 @@ export async function acceptReviewAction(
   revalidatePath("/");
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${acceptedJobId}`);
-  redirect(`/jobs/${acceptedJobId}#coordination`);
+  redirect(`/jobs/${acceptedJobId}#next-steps`);
 }
 
 export async function saveInquiryDecisions(
@@ -304,7 +304,7 @@ export async function saveInquiryDecisions(
       and(eq(actions.id, actionId), eq(actions.workspaceId, ctx.workspaceId)),
     )
     .limit(1);
-  redirect(action?.jobId ? `/jobs/${action.jobId}#coordination` : "/actions");
+  redirect(action?.jobId ? `/jobs/${action.jobId}#next-steps` : "/actions");
 }
 
 export async function saveTreatmentCommitmentDecision(
@@ -359,7 +359,7 @@ export async function saveTreatmentCommitmentDecision(
       and(eq(actions.id, actionId), eq(actions.workspaceId, ctx.workspaceId)),
     )
     .limit(1);
-  redirect(action?.jobId ? `/jobs/${action.jobId}#coordination` : "/actions");
+  redirect(action?.jobId ? `/jobs/${action.jobId}#next-steps` : "/actions");
 }
 
 export async function retryTreatmentPreparation(
