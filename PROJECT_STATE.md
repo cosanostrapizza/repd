@@ -2,6 +2,33 @@
 
 Agent-native workspace redesign — 2026-11-18
 
+## Inline intelligence and unified activity — 2026-11-19
+
+- Job facts now resolve accepted revision history, source evidence, information
+  state, and successful source-analysis runs into one source-aware projection.
+  Proposed, unconfirmed, missing, and conflicting values remain visibly
+  distinct from confirmed terms.
+- A subtle sparkle appears only when a meaningful field contribution has both
+  durable revision evidence and a successful persisted source-analysis run.
+  Initial confirmed source population is not decorated merely because AI was
+  involved. The focused disclosure shows current and previous accepted values,
+  evidence, applied/review state, and the existing correction path.
+- Action-backed communications and invoice drafts expose their current review,
+  approval, and delivery boundary inline. They continue to use the same action
+  and artifact IDs as Today, focused review, and agent history.
+- Job history is one chronological projection over human activities, incoming
+  sources, action transitions, and meaningful agent-run events. Incoming
+  receipt and later human reconciliation remain separate events. Duplicate
+  rows are removed by durable ID; semantically matching action/agent events
+  merge provenance without hiding unrelated work on the same action.
+- No new timeline, proposal, or contribution table was added. Existing JSON
+  event metadata and durable foreign keys are sufficient for the current
+  correlation rules, so no migration was required.
+- Historical field revisions without a persisted source-analysis run retain
+  provenance but are not attributed to Repd. File/OCR ingestion, external
+  monitoring, automatic delivery, invoice issuance, payment reconciliation,
+  and reversible external operations remain unsupported.
+
 ## Product interaction coherence checkpoint
 
 - Ask Repd preserves historical messages and adds one current-outcome card per

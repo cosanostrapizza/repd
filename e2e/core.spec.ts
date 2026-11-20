@@ -383,7 +383,9 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
     page.locator(".person-record").filter({ hasText: "Sarah" }),
   ).toHaveCount(1);
   await expect(
-    page.locator(".fact-row").filter({ hasText: "Usage" }),
+    page.locator(".fact-row").filter({
+      has: page.getByText("Usage & exclusivity", { exact: true }),
+    }),
   ).toContainText("US paid social, web, and retail, 12 months");
   await expect(
     page.locator(".fact-row").filter({ hasText: "Deliverables" }),
@@ -391,6 +393,18 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await expect(
     page.locator(".fact-row").filter({ hasText: "Deliverables" }),
   ).not.toContainText("treatment");
+  const budgetRow = page.locator(".fact-row").filter({
+    has: page.getByText("Indicative budget", { exact: true }),
+  });
+  await expect(budgetRow).toContainText("Proposed · not confirmed");
+  await budgetRow
+    .getByRole("button", {
+      name: "Repd captured an unconfirmed term from the source",
+    })
+    .click();
+  await expect(budgetRow.getByText("Current source value")).toBeVisible();
+  await expect(page.locator("#activity")).toContainText("Incoming information");
+  await expect(page.locator("#activity")).toContainText("Human action");
   await expect(
     page.locator("#next-steps").getByRole("strong").filter({
       hasText: "Producer to send the creative deck",

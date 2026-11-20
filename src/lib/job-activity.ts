@@ -56,6 +56,7 @@ type ActionEventInput = {
     actionId: string;
     type: string;
     reason: string | null;
+    metadata?: Record<string, unknown> | null;
     createdAt: Date;
   };
   action: { title: string; kind: string };
@@ -72,9 +73,10 @@ type AgentEventInput = {
 };
 
 function actionEventPresentation(
-  type: string,
+  event: ActionEventInput["event"],
 ): Pick<JobActivityItem, "kind" | "actorLabel" | "status"> {
-  if (type.includes("approved"))
+  const { type } = event;
+  if (type.includes("approved") || type === "approve")
     return { kind: "approval", actorLabel: "You", status: "completed" };
   if (type === "handoff")
     return { kind: "handoff", actorLabel: "You", status: "completed" };
@@ -92,11 +94,73 @@ function actionEventPresentation(
     };
   if (type.includes("failed"))
     return { kind: "failure", actorLabel: "Repd", status: "failed" };
+  if (
+    [
+      "decision_recorded",
+      "decisions_recorded",
+      "hold_preference_recorded",
+      "preparation_retry_started",
+      "deferred",
+      "defer",
+      "resolve",
+      "dismiss",
+    ].includes(type)
+  )
+    return {
+      kind: "action_transition",
+      actorLabel: "You",
+      status: "completed",
+    };
+  if (type === "conditional_follow_up_created")
+    return {
+      kind: "action_transition",
+      actorLabel: "Repd",
+      status: "completed",
+    };
   return {
     kind: "action_transition",
     actorLabel: "System",
     status: "completed",
   };
+}
+
+function actionEventDetail(event: ActionEventInput["event"]) {
+  if (event.type.includes("prepared"))
+    return "Prepared for review. No external delivery occurred.";
+  if (event.type.includes("approved"))
+    return "Approved internally; approval alone did not send or issue it.";
+  if (event.type === "handoff")
+    return "Copied or opened for handoff; delivery was not yet confirmed.";
+  if (event.type === "execution_confirmed")
+    return "External delivery was explicitly confirmed by the user.";
+  if (event.type === "decision_recorded" || event.type === "decisions_recorded")
+    return "Decision saved to the authoritative job record.";
+  if (event.type.includes("failed"))
+    return (
+      event.reason ??
+      "Preparation failed; the saved business state was unchanged."
+    );
+  return event.reason?.replaceAll("_", " ") ?? event.type.replaceAll("_", " ");
+}
+
+function correlationFamilyForActionEvent(type: string) {
+  if (type.includes("prepared")) return "artifact";
+  if (type.includes("failed")) return "failure";
+  if (type.includes("decision") || type === "hold_preference_recorded")
+    return "record_change";
+  return null;
+}
+
+function correlationFamilyForAgentEvent(type: string) {
+  if (type === "artifact_preparation" || type === "approval_required")
+    return "artifact";
+  if (type === "record_change") return "record_change";
+  if (type === "failure") return "failure";
+  return null;
+}
+
+function uniqueById<T extends { id: string }>(items: T[]) {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
 }
 
 export function projectJobActivity(input: {
@@ -105,20 +169,16 @@ export function projectJobActivity(input: {
   actionEvents: ActionEventInput[];
   agentEvents: AgentEventInput[];
 }): JobActivityItem[] {
-  const representedSourceIds = new Set(
-    input.activities.flatMap((activity) => {
-      const sourceId = activity.metadata?.sourceId;
-      return typeof sourceId === "string" ? [sourceId] : [];
-    }),
-  );
-  const actionEventTimes = new Map<string, number[]>();
-  for (const { event } of input.actionEvents) {
-    const times = actionEventTimes.get(event.actionId) ?? [];
-    times.push(event.createdAt.getTime());
-    actionEventTimes.set(event.actionId, times);
-  }
+  const dedupedActivities = uniqueById(input.activities);
+  const dedupedSources = uniqueById(input.sources);
+  const dedupedActionEvents = [
+    ...new Map(
+      input.actionEvents.map((item) => [item.event.id, item]),
+    ).values(),
+  ];
+  const dedupedAgentEvents = uniqueById(input.agentEvents);
 
-  const activityItems: JobActivityItem[] = input.activities.map((activity) => {
+  const activityItems: JobActivityItem[] = dedupedActivities.map((activity) => {
     const sourceId = activity.metadata?.sourceId;
     return {
       id: `activity:${activity.id}`,
@@ -127,6 +187,7 @@ export function projectJobActivity(input: {
       kind: "business_change",
       summary: activity.summary,
       actorLabel: activity.actorUserId ? "You" : "System",
+      href: typeof sourceId === "string" ? `#source-${sourceId}` : undefined,
       status: "completed",
       provenance: [
         { type: "activity", id: activity.id },
@@ -137,11 +198,8 @@ export function projectJobActivity(input: {
     };
   });
 
-  const sourceItems: JobActivityItem[] = input.sources
-    .filter(
-      (source) =>
-        source.direction === "incoming" && !representedSourceIds.has(source.id),
-    )
+  const sourceItems: JobActivityItem[] = dedupedSources
+    .filter((source) => source.direction === "incoming")
     .map((source) => ({
       id: `source:${source.id}`,
       occurredAt: source.capturedAt,
@@ -150,42 +208,69 @@ export function projectJobActivity(input: {
       summary: source.subject ?? `Received ${source.type.replaceAll("_", " ")}`,
       detail: source.sender ? `From ${source.sender}` : null,
       actorLabel: source.sender ?? "External source",
+      href: `#source-${source.id}`,
       status: "completed",
       provenance: [{ type: "source", id: source.id }],
     }));
 
-  const actionItems: JobActivityItem[] = input.actionEvents.map(
-    ({ event, action }) => ({
-      id: `action-event:${event.id}`,
-      occurredAt: event.createdAt,
-      category:
-        actionEventPresentation(event.type).actorLabel === "Repd"
-          ? "agent"
-          : actionEventPresentation(event.type).actorLabel === "You"
-            ? "human"
-            : "system",
-      summary:
-        event.type === "decision_recorded"
-          ? "Treatment decision recorded"
-          : action.title,
-      detail:
-        event.reason?.replaceAll("_", " ") ?? event.type.replaceAll("_", " "),
-      href: `/actions/${event.actionId}`,
-      provenance: [
-        { type: "action_event", id: event.id },
-        { type: "action", id: event.actionId },
-      ],
-      ...actionEventPresentation(event.type),
-    }),
+  const actionItems: JobActivityItem[] = dedupedActionEvents.map(
+    ({ event, action }) => {
+      const presentation = actionEventPresentation(event);
+      return {
+        id: `action-event:${event.id}`,
+        occurredAt: event.createdAt,
+        category:
+          presentation.actorLabel === "Repd"
+            ? "agent"
+            : presentation.actorLabel === "You"
+              ? "human"
+              : "system",
+        summary:
+          event.type === "decision_recorded"
+            ? "Treatment decision recorded"
+            : action.title,
+        detail: actionEventDetail(event),
+        href: `/actions/${event.actionId}`,
+        provenance: [
+          { type: "action_event", id: event.id },
+          { type: "action", id: event.actionId },
+        ],
+        ...presentation,
+      };
+    },
   );
 
-  const agentItems: JobActivityItem[] = input.agentEvents
-    .filter((event) => {
-      if (!event.actionId) return true;
-      return !(actionEventTimes.get(event.actionId) ?? []).some(
-        (time) => Math.abs(time - event.createdAt.getTime()) < 5 * 60 * 1000,
-      );
-    })
+  const uncorrelatedAgentEvents: AgentEventInput[] = [];
+  for (const event of dedupedAgentEvents) {
+    const family = correlationFamilyForAgentEvent(event.type);
+    const correlated =
+      event.actionId && family
+        ? dedupedActionEvents.find(
+            ({ event: actionEvent }) =>
+              actionEvent.actionId === event.actionId &&
+              correlationFamilyForActionEvent(actionEvent.type) === family &&
+              Math.abs(
+                actionEvent.createdAt.getTime() - event.createdAt.getTime(),
+              ) <
+                5 * 60 * 1000,
+          )
+        : undefined;
+    if (!correlated) {
+      uncorrelatedAgentEvents.push(event);
+      continue;
+    }
+    const item = actionItems.find(
+      (candidate) => candidate.id === `action-event:${correlated.event.id}`,
+    );
+    if (item) item.provenance.push({ type: "agent_run_event", id: event.id });
+  }
+
+  const agentItems: JobActivityItem[] = uncorrelatedAgentEvents
+    .filter(
+      (event) =>
+        !["search", "check", "completed"].includes(event.type) ||
+        event.status === "failed",
+    )
     .map((event) => ({
       id: `agent-event:${event.id}`,
       occurredAt: event.createdAt,
@@ -203,7 +288,9 @@ export function projectJobActivity(input: {
     }));
 
   return [...activityItems, ...sourceItems, ...actionItems, ...agentItems].sort(
-    (a, b) => b.occurredAt.getTime() - a.occurredAt.getTime(),
+    (a, b) =>
+      b.occurredAt.getTime() - a.occurredAt.getTime() ||
+      a.id.localeCompare(b.id),
   );
 }
 

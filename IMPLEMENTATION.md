@@ -3,6 +3,25 @@
 **Updated:** 2026-11-18
 **Status:** Implemented and validated
 
+## Inline intelligence and unified activity — 2026-11-19
+
+- Added `src/lib/job-facts.ts` as a read projection over existing job fields,
+  revisions, sources, and successful inquiry-extraction runs. It is the trust
+  boundary for meaningful sparkle attribution and revision history.
+- Job Workspace fact disclosures show previous/current source values and link
+  to captured evidence and the existing edit surface. Artifact disclosures
+  derive live status from the canonical action plus communication/invoice row.
+- Strengthened `src/lib/job-activity.ts` with durable-ID duplicate handling,
+  deterministic tie ordering, conservative actor classification, distinct
+  incoming/review events, and semantic action/agent correlation that retains
+  all contributing provenance IDs.
+- Kept low-value agent searches/checks out of the default business timeline;
+  failures, record changes, prepared artifacts, approvals, handoffs, and
+  delivery confirmations remain visible.
+- No schema migration or parallel store was needed. Validation passes with 55
+  unit/integration tests and a production Next.js build; the retained workspace
+  database was inspected read-only during browser QA.
+
 ## Architecture decisions
 
 1. Preserve the relational business model and source/revision evidence system.

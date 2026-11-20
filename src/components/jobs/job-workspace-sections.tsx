@@ -11,9 +11,10 @@ import {
 import { RetryPreparationForm } from "@/components/agent/retry-preparation-form";
 import { TreatmentDecisionForm } from "@/components/agent/treatment-decision-form";
 import { HoldForm, JobForm, ParticipantForm } from "@/components/forms";
-import type { Job, Organization, Source } from "@/db/schema";
+import type { Action, Job, Organization } from "@/db/schema";
 import { bookingLabels, formatMoney, lifecycleLabels } from "@/lib/domain";
 import type { JobActivityItem } from "@/lib/job-activity";
+import type { DisplayedJobFact, JobFactRevision } from "@/lib/job-facts";
 import { transitionHold } from "@/lib/server-actions";
 import {
   getJobWorkspaceState,
@@ -34,23 +35,6 @@ type ParticipantRow = {
   };
   person: { id: string; name: string } | null;
   organization: string | null;
-};
-
-type FieldRow = {
-  field: {
-    id: string;
-    key: string;
-    label: string | null;
-    requirementReason: string | null;
-  };
-  revision: {
-    id: string;
-    sourceId: string | null;
-    informationState:
-      "confirmed" | "proposed" | "unconfirmed" | "missing" | "conflicting";
-    confidence: number | null;
-    createdAt: Date;
-  } | null;
 };
 
 function workLabel(item: WorkspaceWorkItem) {
@@ -256,35 +240,104 @@ function FactRow({
   label,
   value,
   fieldKey,
-  fields,
-  sources,
+  facts,
+  currency,
 }: {
   label: string;
   value: string;
   fieldKey?: string;
-  fields: FieldRow[];
-  sources: Source[];
+  facts: DisplayedJobFact[];
+  currency: string;
 }) {
   const tracked = fieldKey
-    ? fields.find(({ field }) => field.key === fieldKey)
+    ? facts.find((fact) => fact.key === fieldKey)
     : undefined;
-  const source = tracked?.revision?.sourceId
-    ? sources.find((item) => item.id === tracked.revision?.sourceId)
-    : undefined;
+  const current = tracked?.current;
+  const previous = tracked?.history.find(
+    (revision) =>
+      revision.id !== tracked.acceptedRevisionId &&
+      revision.reviewStatus === "accepted",
+  );
+  const formatRevisionValue = (revision: JobFactRevision | undefined) => {
+    if (!revision || revision.value == null || revision.value === "")
+      return "No value recorded";
+    if (fieldKey === "feeCents" && typeof revision.value === "number")
+      return formatMoney(revision.value, currency);
+    if (Array.isArray(revision.value)) return revision.value.join(", ");
+    if (typeof revision.value === "object")
+      return JSON.stringify(revision.value);
+    return String(revision.value);
+  };
+  const stateLabel = current
+    ? current.informationState === "proposed"
+      ? "Proposed · not confirmed"
+      : current.informationState === "unconfirmed"
+        ? "Unconfirmed"
+        : current.informationState === "conflicting"
+          ? "Conflicting sources"
+          : current.informationState === "missing"
+            ? "Missing"
+            : "Confirmed"
+    : null;
   return (
     <div className="job-field-row fact-row">
       <dt>{label}</dt>
       <dd>
-        <strong>{value}</strong>
-        {(tracked?.revision || source) && (
+        <div className="fact-value-line">
+          <strong>{value}</strong>
+          {tracked?.contribution && current && (
+            <details className="inline-contribution">
+              <summary aria-label={tracked.contribution.title}>
+                <Sparkles size={13} aria-hidden="true" />
+              </summary>
+              <div className="contribution-popover">
+                <p className="contribution-title">
+                  <Sparkles size={13} aria-hidden="true" />
+                  <strong>{tracked.contribution.title}</strong>
+                </p>
+                <span className={`state-pill ${current.informationState}`}>
+                  {stateLabel}
+                </span>
+                <dl>
+                  <div>
+                    <dt>Current source value</dt>
+                    <dd>{formatRevisionValue(current)}</dd>
+                  </div>
+                  {previous && (
+                    <div>
+                      <dt>Previous accepted value</dt>
+                      <dd>{formatRevisionValue(previous)}</dd>
+                    </div>
+                  )}
+                </dl>
+                <p>
+                  {current.informationState === "confirmed"
+                    ? "This accepted revision is applied to the job record."
+                    : current.informationState === "missing"
+                      ? "No confirmed value was applied."
+                      : "The record preserves this state and does not treat the value as confirmed."}
+                </p>
+                {current.source && (
+                  <a href={`#source-${current.source.id}`}>
+                    View source evidence
+                  </a>
+                )}
+                <a href="#edit-job">Correct the job record</a>
+              </div>
+            </details>
+          )}
+        </div>
+        {current && (
           <span className="field-provenance">
-            {tracked?.revision?.informationState.replaceAll("_", " ")}
-            {tracked?.revision?.confidence != null
-              ? ` · ${tracked.revision.confidence}% confidence`
+            <span className={`fact-state ${current.informationState}`}>
+              {stateLabel}
+            </span>
+            {current.confidence != null
+              ? ` · ${current.confidence}% confidence`
               : ""}
-            {source && (
-              <a href={`#source-${source.id}`}>
-                {` · ${source.subject ?? source.type.replaceAll("_", " ")}`}
+            {current.source && (
+              <a href={`#source-${current.source.id}`}>
+                {` · ${current.source.label}`}
               </a>
             )}
           </span>
@@ -298,12 +351,12 @@ export function JobRecord({
   state,
   organizations,
   participants,
-  fields,
+  facts,
 }: {
   state: WorkspaceState;
   organizations: Organization[];
   participants: ParticipantRow[];
-  fields: FieldRow[];
+  facts: DisplayedJobFact[];
 }) {
   const { job } = state;
   const display = (value: unknown) =>
@@ -335,16 +388,16 @@ export function JobRecord({
           <FactRow
             label="Shoot"
             value={shoot}
-            fieldKey="shootDate"
-            fields={fields}
-            sources={state.documents}
+            fieldKey="shootStart"
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Location"
             value={display(job.location)}
             fieldKey="location"
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
         </dl>
         <div className="structured-objects">
@@ -432,48 +485,48 @@ export function JobRecord({
             label="Creative fee"
             value={formatMoney(job.feeCents, job.currency)}
             fieldKey="feeCents"
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Fee status"
             value={job.feeState}
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Indicative budget"
             value={budget}
-            fieldKey="proposedBudget"
-            fields={fields}
-            sources={state.documents}
+            fieldKey="budgetRange"
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Usage & exclusivity"
             value={display(job.usageTerms)}
             fieldKey="usageTerms"
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Deliverables"
             value={display(job.deliverables)}
             fieldKey="deliverables"
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Payment terms"
             value={display(job.paymentTerms)}
             fieldKey="paymentTerms"
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
           <FactRow
             label="Invoice status"
             value={job.invoiceStatus.replaceAll("_", " ")}
-            fields={fields}
-            sources={state.documents}
+            facts={facts}
+            currency={job.currency}
           />
         </dl>
       </div>
@@ -530,6 +583,53 @@ export function JobRecord({
   );
 }
 
+function ArtifactContribution({
+  action,
+  artifactStatus,
+  kind,
+}: {
+  action: Action;
+  artifactStatus: string;
+  kind: "communication" | "invoice";
+}) {
+  const delivered = kind === "communication" && artifactStatus === "sent";
+  const approved =
+    action.status === "approved" || artifactStatus === "approved";
+  return (
+    <details className="inline-contribution artifact-contribution">
+      <summary aria-label={`Inspect Repd's prepared ${kind}`}>
+        <Sparkles size={13} aria-hidden="true" />
+      </summary>
+      <div className="contribution-popover">
+        <p className="contribution-title">
+          <Sparkles size={13} aria-hidden="true" />
+          <strong>Repd prepared this {kind}</strong>
+        </p>
+        <span
+          className={`state-pill ${delivered ? "sent" : approved ? "approved" : "proposed"}`}
+        >
+          {delivered
+            ? "Delivery confirmed"
+            : approved
+              ? "Approved internally"
+              : "Awaiting review"}
+        </span>
+        <p>{action.explanation}</p>
+        <p>
+          {delivered
+            ? "The audit trail records explicit delivery confirmation."
+            : kind === "invoice"
+              ? "This is an internal draft. It has not been numbered, issued, or sent."
+              : "No message is treated as sent until delivery is explicitly confirmed."}
+        </p>
+        <Link href={`/actions/${action.id}`}>
+          {approved ? "Open approved artifact" : "Review and correct"}
+        </Link>
+      </div>
+    </details>
+  );
+}
+
 export function JobArtifacts({ state }: { state: WorkspaceState }) {
   const hasArtifacts = state.messages.length || state.invoiceDrafts.length;
   return (
@@ -545,40 +645,70 @@ export function JobArtifacts({ state }: { state: WorkspaceState }) {
         </div>
       </div>
       <div className="artifact-list">
-        {state.messages.map((message) => (
-          <article className="artifact-row" key={message.id}>
-            <FileText size={17} />
-            <div>
-              <strong>{message.subject}</strong>
-              <span>Communication · revision {message.revision}</span>
-            </div>
-            <small className={`record-state ${message.status}`}>
-              {message.status.replaceAll("_", " ")}
-            </small>
-            {message.actionId && (
-              <Link
-                className="quiet-link"
-                href={`/actions/${message.actionId}`}
-              >
-                Review
-              </Link>
-            )}
-          </article>
-        ))}
-        {state.invoiceDrafts.map((draft) => (
-          <article className="artifact-row" key={draft.id}>
-            <FileText size={17} />
-            <div>
-              <strong>Invoice draft</strong>
-              <span>{draft.status} · internal draft, not issued or sent</span>
-            </div>
-            {draft.actionId && (
-              <Link className="quiet-link" href={`/actions/${draft.actionId}`}>
-                Review
-              </Link>
-            )}
-          </article>
-        ))}
+        {state.messages.map((message) => {
+          const action = state.allActions.find(
+            (candidate) => candidate.id === message.actionId,
+          );
+          return (
+            <article className="artifact-row" key={message.id}>
+              <FileText size={17} />
+              <div>
+                <strong>{message.subject}</strong>
+                <span>Communication · revision {message.revision}</span>
+              </div>
+              {action && (
+                <ArtifactContribution
+                  action={action}
+                  artifactStatus={message.status}
+                  kind="communication"
+                />
+              )}
+              <small className={`record-state ${message.status}`}>
+                {message.status.replaceAll("_", " ")}
+              </small>
+              {message.actionId && (
+                <Link
+                  className="quiet-link"
+                  href={`/actions/${message.actionId}`}
+                >
+                  Review
+                </Link>
+              )}
+            </article>
+          );
+        })}
+        {state.invoiceDrafts.map((draft) => {
+          const action = state.allActions.find(
+            (candidate) => candidate.id === draft.actionId,
+          );
+          return (
+            <article className="artifact-row" key={draft.id}>
+              <FileText size={17} />
+              <div>
+                <strong>Invoice draft</strong>
+                <span>{draft.status} · internal draft, not issued or sent</span>
+              </div>
+              {action && (
+                <ArtifactContribution
+                  action={action}
+                  artifactStatus={draft.status}
+                  kind="invoice"
+                />
+              )}
+              <small className={`record-state ${draft.status}`}>
+                {draft.status}
+              </small>
+              {draft.actionId && (
+                <Link
+                  className="quiet-link"
+                  href={`/actions/${draft.actionId}`}
+                >
+                  Review
+                </Link>
+              )}
+            </article>
+          );
+        })}
         {!hasArtifacts && (
           <p className="compact-empty">No prepared artifacts yet.</p>
         )}
@@ -625,6 +755,17 @@ export function JobArtifacts({ state }: { state: WorkspaceState }) {
 }
 
 export function JobActivityTimeline({ items }: { items: JobActivityItem[] }) {
+  const kindLabel = (item: JobActivityItem) => {
+    if (item.kind === "source_received") return "Incoming information";
+    if (item.kind === "approval") return "Review & approval";
+    if (item.kind === "handoff") return "Handoff";
+    if (item.kind === "delivery_confirmation") return "Delivery confirmation";
+    if (item.kind === "artifact_prepared") return "Agent contribution";
+    if (item.kind === "failure") return "Exception";
+    if (item.category === "human") return "Human action";
+    if (item.category === "agent") return "Agent action";
+    return "System update";
+  };
   return (
     <section
       id="activity"
@@ -646,7 +787,9 @@ export function JobActivityTimeline({ items }: { items: JobActivityItem[] }) {
               />
               <div>
                 <div className="timeline-meta">
-                  <span>{item.actorLabel}</span>
+                  <span>
+                    {item.actorLabel} · {kindLabel(item)}
+                  </span>
                   <time dateTime={item.occurredAt.toISOString()}>
                     {item.occurredAt.toLocaleString()}
                   </time>

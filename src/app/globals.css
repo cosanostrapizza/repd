@@ -3897,12 +3897,118 @@ label {
   overflow-wrap: anywhere;
 }
 
+.fact-value-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.inline-contribution {
+  position: relative;
+  flex: none;
+}
+
+.inline-contribution > summary {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #687759;
+  cursor: pointer;
+  list-style: none;
+}
+
+.inline-contribution > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inline-contribution > summary:hover,
+.inline-contribution[open] > summary {
+  background: #edf1e7;
+  color: #43533c;
+}
+
+.contribution-popover {
+  position: absolute;
+  z-index: 20;
+  top: 30px;
+  right: 0;
+  width: min(330px, calc(100vw - 48px));
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  text-transform: none;
+}
+
+.contribution-popover .contribution-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 9px;
+  color: var(--ink);
+}
+
+.contribution-popover .contribution-title svg {
+  flex: none;
+  margin-top: 2px;
+  color: #687759;
+}
+
+.contribution-popover dl {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.contribution-popover dl div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.contribution-popover dt,
+.contribution-popover p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.contribution-popover dd {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.contribution-popover > a {
+  display: inline-block;
+  margin: 5px 12px 0 0;
+  color: #415d4d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.contribution-popover > a:hover {
+  text-decoration: underline;
+}
+
 .field-provenance {
   display: block;
   margin-top: 3px;
   color: var(--muted);
   font-size: 10px;
   text-transform: capitalize;
+}
+
+.fact-state.proposed,
+.fact-state.unconfirmed {
+  color: #765a27;
+}
+
+.fact-state.missing,
+.fact-state.conflicting {
+  color: var(--terracotta);
+  font-weight: 700;
 }
 
 .field-provenance a:hover {
@@ -3975,11 +4081,15 @@ label {
 
 .artifact-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto auto;
   gap: 10px;
   align-items: center;
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
+}
+
+.artifact-contribution .contribution-popover {
+  right: -70px;
 }
 
 .artifact-row > svg {
@@ -4085,7 +4195,6 @@ a.timeline-row:hover {
   margin: 2px 0 0;
   color: var(--muted);
   font-size: 10px;
-  text-transform: capitalize;
 }
 
 .job-loading {

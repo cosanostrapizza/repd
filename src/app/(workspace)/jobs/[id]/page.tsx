@@ -8,15 +8,10 @@ import {
   JobRecord,
 } from "@/components/jobs/job-workspace-sections";
 import { db } from "@/db/client";
-import {
-  jobFieldRevisions,
-  jobFields,
-  jobParticipants,
-  organizations,
-  people,
-} from "@/db/schema";
+import { jobParticipants, organizations, people } from "@/db/schema";
 import { requireContext } from "@/lib/auth";
 import { getJobActivityTimeline } from "@/lib/job-activity";
+import { getDisplayedJobFacts } from "@/lib/job-facts";
 import { getJobWorkspaceState } from "@/lib/workspace-state";
 
 export default async function JobDetail({
@@ -32,7 +27,7 @@ export default async function JobDetail({
   const workspaceState = await getJobWorkspaceState(ctx.workspaceId, id);
   if (!workspaceState) notFound();
 
-  const [organizationsList, participants, fieldRows, activity] =
+  const [organizationsList, participants, displayedFacts, activity] =
     await Promise.all([
       db
         .select()
@@ -56,19 +51,7 @@ export default async function JobDetail({
             eq(jobParticipants.workspaceId, ctx.workspaceId),
           ),
         ),
-      db
-        .select({ field: jobFields, revision: jobFieldRevisions })
-        .from(jobFields)
-        .leftJoin(
-          jobFieldRevisions,
-          eq(jobFields.acceptedRevisionId, jobFieldRevisions.id),
-        )
-        .where(
-          and(
-            eq(jobFields.jobId, id),
-            eq(jobFields.workspaceId, ctx.workspaceId),
-          ),
-        ),
+      getDisplayedJobFacts(ctx.workspaceId, id),
       getJobActivityTimeline(ctx.workspaceId, id),
     ]);
 
@@ -93,7 +76,7 @@ export default async function JobDetail({
               state={workspaceState}
               organizations={organizationsList}
               participants={participants}
-              fields={fieldRows}
+              facts={displayedFacts}
             />
           </div>
           <aside className="job-document-rail">
