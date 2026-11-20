@@ -280,14 +280,19 @@ function FactRow({
             : "Confirmed"
     : null;
   return (
-    <div className="job-field-row fact-row">
+    <div
+      className="job-field-row fact-row"
+      data-agent-context-kind="field"
+      data-agent-context-id={fieldKey}
+      data-agent-context-label={`${label}: ${value}`}
+    >
       <dt>{label}</dt>
       <dd>
         <div className="fact-value-line">
           <strong>{value}</strong>
           {tracked?.contribution && current && (
             <details className="inline-contribution">
-              <summary aria-label={tracked.contribution.title}>
+              <summary role="button" aria-label={tracked.contribution.title}>
                 <Sparkles size={13} aria-hidden="true" />
               </summary>
               <div className="contribution-popover">
@@ -597,7 +602,7 @@ function ArtifactContribution({
     action.status === "approved" || artifactStatus === "approved";
   return (
     <details className="inline-contribution artifact-contribution">
-      <summary aria-label={`Inspect Repd's prepared ${kind}`}>
+      <summary role="button" aria-label={`Inspect Repd's prepared ${kind}`}>
         <Sparkles size={13} aria-hidden="true" />
       </summary>
       <div className="contribution-popover">
@@ -650,7 +655,13 @@ export function JobArtifacts({ state }: { state: WorkspaceState }) {
             (candidate) => candidate.id === message.actionId,
           );
           return (
-            <article className="artifact-row" key={message.id}>
+            <article
+              className="artifact-row"
+              key={message.id}
+              data-agent-context-kind="artifact"
+              data-agent-context-id={message.id}
+              data-agent-context-label={`Communication: ${message.subject}`}
+            >
               <FileText size={17} />
               <div>
                 <strong>{message.subject}</strong>
@@ -682,7 +693,13 @@ export function JobArtifacts({ state }: { state: WorkspaceState }) {
             (candidate) => candidate.id === draft.actionId,
           );
           return (
-            <article className="artifact-row" key={draft.id}>
+            <article
+              className="artifact-row"
+              key={draft.id}
+              data-agent-context-kind="artifact"
+              data-agent-context-id={draft.id}
+              data-agent-context-label="Invoice draft"
+            >
               <FileText size={17} />
               <div>
                 <strong>Invoice draft</strong>
@@ -737,6 +754,11 @@ export function JobArtifacts({ state }: { state: WorkspaceState }) {
               id={`source-${source.id}`}
               className="source-document compact-source"
               key={source.id}
+              data-agent-context-kind="source"
+              data-agent-context-id={source.id}
+              data-agent-context-label={
+                source.subject ?? source.type.replaceAll("_", " ")
+              }
             >
               <summary>
                 <FileText size={15} />{" "}

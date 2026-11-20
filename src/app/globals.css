@@ -380,13 +380,22 @@ p {
   flex-wrap: wrap;
   gap: 7px;
 }
-.agent-prompts span {
+.agent-prompts span,
+.agent-prompts button {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 10px;
   background: white;
   color: #49554e;
   font-size: 12px;
+}
+.agent-prompts button {
+  cursor: pointer;
+  text-align: left;
+}
+.agent-prompts button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
 }
 .agent-events {
   list-style: none;
@@ -2154,6 +2163,21 @@ html.agent-panel-wide .app-shell {
   padding: 0 12px 12px;
   margin: 0;
 }
+.agent-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.agent-message > .button {
+  margin-top: 8px;
+  margin-right: 6px;
+}
 
 .today-page {
   max-width: 1040px;
@@ -2819,6 +2843,9 @@ html.agent-panel-wide .app-shell {
   }
 }
 @media (max-width: 900px) {
+  html.agent-panel-modal {
+    overflow: hidden;
+  }
   html.agent-panel-open .app-shell,
   html.agent-panel-wide .app-shell {
     display: block;

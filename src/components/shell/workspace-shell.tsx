@@ -109,9 +109,13 @@ export function WorkspaceShell({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileOpen]);
 
-  function openAgent() {
+  function openAgent(opener: HTMLElement) {
     setMobileOpen(false);
-    window.dispatchEvent(new Event(agentOpenEvent));
+    window.dispatchEvent(
+      new CustomEvent(agentOpenEvent, {
+        detail: { opener: mobileOpen ? mobileTrigger.current : opener },
+      }),
+    );
   }
 
   const sidebarContent = (isCollapsed: boolean, mobile = false) => (
@@ -166,7 +170,7 @@ export function WorkspaceShell({
         <button
           type="button"
           className="nav-agent-button"
-          onClick={openAgent}
+          onClick={(event) => openAgent(event.currentTarget)}
           aria-label={isCollapsed ? "Ask Repd" : undefined}
           data-tooltip={isCollapsed ? "Ask Repd" : undefined}
         >
@@ -224,10 +228,10 @@ export function WorkspaceShell({
           </div>
           <span
             className="topbar-shortcut"
-            aria-label="Toggle navigation with Command or Control plus backslash"
+            aria-label="Ask Repd with Command or Control plus K"
           >
-            <kbd>⌘/Ctrl</kbd>
-            <kbd>\\</kbd>
+            Ask Repd <kbd>⌘/Ctrl</kbd>
+            <kbd>K</kbd>
           </span>
         </header>
         {children}

@@ -29,7 +29,7 @@ The largest constraint is that Repd has no background worker or external sync. C
 
 The following decisions are binding for implementation:
 
-- `Mod+J` opens the contextual agent. `Mod+K` is reserved for a future global search/command surface.
+- `Mod+K` opens the contextual agent. A future global search/command surface must use a different binding or explicitly resolve the conflict.
 - `/agent` remains a supported expanded fallback, but Ask Repd is removed from primary navigation.
 - `/contacts` becomes the canonical combined directory. Existing `/people/[id]` and `/organizations/[id]` detail URLs remain stable.
 - Sidebar collapse preference is device-local and does not add a user-preference model.
@@ -681,7 +681,7 @@ No schema or product behavior changes in this phase.
 ### Phase 2 — Agent surface behavior
 
 1. Decompose `AgentPanel` into surface, conversation, composer, execution details, and current outcome components.
-2. Add the approved `Mod+J` keyboard shortcut and explicitly reserve `Mod+K` for future global search/commands.
+2. Add the approved `Mod+K` keyboard shortcut for the contextual agent.
 3. Add Escape-to-close, initial focus, mobile focus trap, and focus restoration.
 4. Preserve the current durable thread and page-context hint.
 5. Append the latest submitted turn to the live conversation presentation without waiting for a navigation refresh.
@@ -773,7 +773,7 @@ Preserve or add coverage for:
 Desktop and mobile Playwright should verify:
 
 1. sidebar expansion/collapse, persistence, active states, and keyboard navigation;
-2. `Mod+J` opens the agent with current job context, Escape closes it, and focus returns to the trigger;
+2. `Mod+K` opens the agent with current job context, Escape closes it, and focus returns to the trigger;
 3. mobile agent is full-screen and does not leak focus behind the surface;
 4. Today and Jobs agree on the recommended next need;
 5. Contacts shows people and companies without merging their records;

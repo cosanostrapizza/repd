@@ -58,7 +58,11 @@ export default async function JobDetail({
   return (
     <>
       <JobHeader job={workspaceState.job} client={workspaceState.clientName} />
-      <main className="content job-document">
+      <main
+        className="content job-document"
+        data-agent-job-id={workspaceState.job.id}
+        data-agent-job-title={workspaceState.job.title}
+      >
         {justUpdated && (
           <div className="update-notice" role="status">
             <div>

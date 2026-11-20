@@ -24,6 +24,7 @@ export default async function AgentPage() {
           id: message.id,
           role: message.role,
           content: message.content,
+          links: message.metadata?.links,
           currentOutcome: message.currentOutcome,
         }))}
       />

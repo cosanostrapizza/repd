@@ -25,6 +25,7 @@ export default async function WorkspaceLayout({
         id: message.id,
         role: message.role,
         content: message.content,
+        links: message.metadata?.links,
         currentOutcome: message.currentOutcome,
       }))}
     >

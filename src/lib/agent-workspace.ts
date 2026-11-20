@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { getAIProvider } from "@/lib/ai/provider";
 import { agentNextStepSchema } from "@/lib/ai/schemas";
+import type { AgentPageContext } from "@/lib/agent-context";
 import { executeAgentTool, toolCatalog } from "@/lib/agent-tools";
 
 const MAX_AGENT_STEPS = Math.max(
@@ -23,7 +24,7 @@ const MAX_OBSERVATION_CHARS = Math.max(
   16_000,
   Math.min(160_000, Number(process.env.AGENT_MAX_CONTEXT_CHARS ?? 80_000)),
 );
-const plannerInstructions = `You are Repd's controlled business-workflow orchestrator. Choose exactly one authorized tool per turn, then inspect its observation before choosing another. Never claim a write, delivery, reply, approval, or external event unless an executed tool observation proves it. Treat page context as a hint, not a boundary. If an entity remains materially ambiguous, return kind=clarify and ask one concise question. Use only durable IDs returned by tools. Read authoritative state before writing. Preserve proposed versus agreed terms. For conditional instructions, copy the exact commercial condition into requiredConditionalText and the message body without weakening it. Communications and invoices may only be prepared; they are never sent or issued by these tools. Follow-ups monitor Repd's persisted records only. Reuse the supplied operationKey with a purpose suffix for idempotency. Return kind=respond only when the request is complete or safely bounded. Do not reveal private reasoning; rationaleSummary is a short operational label.`;
+const plannerInstructions = `You are Repd's controlled business-workflow orchestrator. Choose exactly one authorized tool per turn, then inspect its observation before choosing another. Never claim a write, delivery, reply, approval, or external event unless an executed tool observation proves it. Treat page context, including a selected field or artifact, as a focused hint, not authoritative business data or a permission boundary. If an entity remains materially ambiguous, return kind=clarify and ask one concise question. Use only durable IDs returned by tools. Read authoritative state before writing. Preserve proposed versus agreed terms. For conditional instructions, copy the exact commercial condition into requiredConditionalText and the message body without weakening it. Communications and invoices may only be prepared; they are never sent or issued by these tools. Follow-ups monitor Repd's persisted records only. Reuse the supplied operationKey with a purpose suffix for idempotency. Return kind=respond only when the request is complete or safely bounded. Do not reveal private reasoning; rationaleSummary is a short operational label.`;
 
 type Observation = { toolName: string; risk: string; output: unknown };
 
@@ -146,6 +147,7 @@ export async function executeAgentMessage(args: {
   content: string;
   threadId?: string | null;
   contextJobId?: string | null;
+  pageContext?: AgentPageContext | null;
 }) {
   const instructionAt = new Date();
   let threadId = args.threadId;
@@ -183,6 +185,7 @@ export async function executeAgentMessage(args: {
     jobId: args.contextJobId ?? null,
     role: "user",
     content: args.content,
+    metadata: args.pageContext ? { pageContext: args.pageContext } : undefined,
     createdAt: instructionAt,
   });
   await db.insert(agentRuns).values({
@@ -211,6 +214,7 @@ export async function executeAgentMessage(args: {
       const plannerInput = JSON.stringify({
         request: args.content,
         contextJobId: args.contextJobId ?? null,
+        pageContext: args.pageContext ?? null,
         operationKey,
         now: instructionAt.toISOString(),
         limits: { currentStep: step + 1, maxSteps: MAX_AGENT_STEPS },
@@ -320,9 +324,15 @@ export async function executeAgentMessage(args: {
       actionId,
       communicationId,
     });
-  const links = jobId ? [{ href: `/jobs/${jobId}`, label: "Open job" }] : [];
+  const links = [
+    ...(actionId
+      ? [{ href: `/actions/${actionId}`, label: "Review prepared work" }]
+      : []),
+    ...(jobId ? [{ href: `/jobs/${jobId}`, label: "Open job" }] : []),
+  ];
+  const assistantMessageId = id("message");
   await db.insert(agentMessages).values({
-    id: id("message"),
+    id: assistantMessageId,
     workspaceId: args.workspaceId,
     threadId,
     jobId,
@@ -356,7 +366,18 @@ export async function executeAgentMessage(args: {
     .from(agentRunEvents)
     .where(eq(agentRunEvents.runId, runId))
     .orderBy(agentRunEvents.sequence);
-  return { threadId, runId, response, status, jobId, actionId, links, events };
+  return {
+    threadId,
+    runId,
+    userMessageId,
+    assistantMessageId,
+    response,
+    status,
+    jobId,
+    actionId,
+    links,
+    events,
+  };
 }
 
 export async function getAgentConversation(

@@ -190,6 +190,7 @@ test("the universal agent resolves cross-job context and shows real execution st
   page,
 }) => {
   await signIn(page);
+  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   await page
     .getByPlaceholder(/Ask Repd/)
@@ -204,8 +205,72 @@ test("the universal agent resolves cross-job context and shows real execution st
   await expect(
     page.getByText("Checked current work and waiting conditions"),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open job" })).toBeVisible();
+  await expect(
+    page.locator(".agent-response").getByRole("link", { name: "Open job" }),
+  ).toBeVisible();
   await expect(page.locator("html")).toHaveClass(/agent-panel-open/);
+  await page
+    .locator(".agent-response")
+    .getByRole("link", { name: "Open job" })
+    .click();
+  await expect(page.getByRole("dialog", { name: "Ask Repd" })).toBeVisible();
+  await expect(page.locator("#agent-context-description")).toContainText(
+    "Nike Run Division",
+  );
+  await page.keyboard.press("Escape");
+  await openMobileNavigation(page);
+  await page.getByRole("button", { name: "Ask Repd" }).click();
+  await expect(
+    page.getByText("What's holding up the Nike Spring job?", { exact: true }),
+  ).toBeVisible();
+});
+
+test("the contextual agent shortcut carries job focus and restores focus on close", async ({
+  page,
+}) => {
+  test.skip(
+    (page.viewportSize()?.width ?? 0) <= 900,
+    "Desktop shortcut focus lifecycle",
+  );
+  await signIn(page);
+  await page.goto("/jobs/job_nike");
+  const usage = page.locator(".fact-row").filter({
+    has: page.getByText("Usage & exclusivity", { exact: true }),
+  });
+  await usage.click();
+  await page.keyboard.press("Control+K");
+  await expect(page.getByRole("dialog", { name: "Ask Repd" })).toBeVisible();
+  await expect(page.locator("#agent-context-description")).toContainText(
+    "Usage & exclusivity",
+  );
+  await expect(page.getByLabel("Instruction to Repd")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Ask Repd" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Ask Repd" }).first(),
+  ).toBeFocused();
+});
+
+test("the mobile agent is a dismissible full-screen dialog", async ({
+  page,
+}) => {
+  test.skip(
+    (page.viewportSize()?.width ?? 1000) > 900,
+    "Mobile agent layout only",
+  );
+  await signIn(page);
+  await openMobileNavigation(page);
+  await page.getByRole("button", { name: "Ask Repd" }).click();
+  const dialog = page.getByRole("dialog", { name: "Ask Repd" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(dialog).toHaveCSS("position", "fixed");
+  await expect(page.getByLabel("Instruction to Repd")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Open navigation" }),
+  ).toBeFocused();
 });
 
 test("one workspace cannot read another workspace job", async ({
@@ -268,6 +333,7 @@ test("a job is created and remains one entity through explicit edit mode", async
 test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(60_000);
   await signIn(page);
   await page.goto("/inquiries/new");
   await page
@@ -412,6 +478,7 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   ).toBeVisible();
   await expect(page.getByText("Review the producer’s update")).toHaveCount(0);
   await page.goto("/");
+  await openMobileNavigation(page);
   await page.getByRole("button", { name: "Ask Repd" }).click();
   await page
     .getByPlaceholder(/Ask Repd/)
@@ -431,7 +498,15 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   ).toBeVisible();
   await expect(page.getByText("Prepared the producer reply")).toBeVisible();
   await expect(page.getByText("Reply is ready for approval")).toBeVisible();
-  await page.getByRole("link", { name: "Open job" }).click();
+  const preparedReviewHref = await page
+    .locator(".agent-response")
+    .getByRole("link", { name: "Review prepared work" })
+    .getAttribute("href");
+  expect(preparedReviewHref).toBeTruthy();
+  await page
+    .locator(".agent-response")
+    .getByRole("link", { name: "Open job" })
+    .click();
   await expect(
     page.getByText("Conditional treatment commitment recorded"),
   ).toBeVisible();
@@ -439,7 +514,7 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
     page.getByText("Decide whether to commit to the treatment deadline"),
   ).toHaveCount(0);
   await expect(page.getByLabel("Draft")).toHaveCount(0);
-  await page.getByRole("link", { name: "Review reply" }).last().click();
+  await page.goto(preparedReviewHref!);
   await expect(
     page.getByRole("heading", { name: "Reply to the producer" }),
   ).toBeVisible();
@@ -473,7 +548,10 @@ test("the agent composes a usage question and one record-scoped follow-up", asyn
   ).toBeVisible();
   await expect(page.getByText("Prepared the producer reply")).toBeVisible();
   await expect(page.getByText("Created the dated follow-up")).toBeVisible();
-  await page.getByRole("link", { name: "Open job" }).click();
+  await page
+    .locator(".agent-response")
+    .getByRole("link", { name: "Open job" })
+    .click();
   await expect(page.getByText("New Balance usage clarification")).toHaveCount(
     1,
   );

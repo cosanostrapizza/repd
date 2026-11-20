@@ -665,6 +665,15 @@ export const agentMessages = pgTable("agent_messages", {
     communicationId?: string;
     links?: Array<{ href: string; label: string }>;
     clarification?: boolean;
+    pageContext?: {
+      route: string;
+      job?: { id: string; title?: string };
+      selected?: {
+        kind: "field" | "artifact" | "source" | "section";
+        id?: string;
+        label: string;
+      };
+    };
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
