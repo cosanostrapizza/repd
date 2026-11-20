@@ -1,5 +1,10 @@
 import type { Action } from "@/db/schema";
 
+export type HandledWorkPresentation = {
+  title: string;
+  detail: string;
+};
+
 export function isActionActive(action: Action, now = new Date()) {
   if (action.status === "resolved" || action.supersededById) return false;
   if (
@@ -41,6 +46,79 @@ export function actionAttentionLabel(
   return action.title;
 }
 
+export function actionDestination(
+  action: Pick<Action, "id" | "jobId" | "kind">,
+) {
+  if (
+    action.jobId &&
+    ["advance_inquiry", "treatment_commitment"].includes(action.kind)
+  )
+    return `/jobs/${action.jobId}#next-steps`;
+  return `/actions/${action.id}`;
+}
+
+export function actionPreparedSummary(
+  action: Pick<
+    Action,
+    "kind" | "status" | "executionStatus" | "recommendation" | "preparedContent"
+  >,
+) {
+  if (action.executionStatus === "failed")
+    return "Your saved decision is intact; Repd can retry the preparation.";
+  if (action.kind === "hold_conflict")
+    return "Repd gathered the overlapping holds and their current job context.";
+  if (action.kind === "invoice" && action.status === "pending_approval")
+    return "An internal invoice draft is ready. It has not been issued or sent.";
+  if (
+    ["producer_coordination", "missing_information"].includes(action.kind) &&
+    (action.preparedContent || action.status === "pending_approval")
+  )
+    return "A source-backed reply is prepared for your review.";
+  if (["advance_inquiry", "treatment_commitment"].includes(action.kind))
+    return "Repd organized the relevant facts and decision context in the job.";
+  return action.recommendation;
+}
+
+export function handledActivityPresentation(
+  type: string,
+  summary: string,
+): HandledWorkPresentation | null {
+  if (type === "producer_response_accepted")
+    return {
+      title: "Reconciled a producer update",
+      detail: summary,
+    };
+  if (type === "source_update_accepted")
+    return {
+      title: "Updated the job brief from new information",
+      detail: summary,
+    };
+  if (type === "inquiry_accepted")
+    return {
+      title: "Organized a new inquiry into a job brief",
+      detail: summary,
+    };
+  return null;
+}
+
+export function handledActionEventPresentation(
+  type: string,
+): HandledWorkPresentation | null {
+  if (type === "invoice_prepared_automatically")
+    return {
+      title: "Prepared an invoice draft",
+      detail:
+        "Repd used the confirmed job and billing details. The draft still requires review before any external handoff.",
+    };
+  if (type === "conditional_follow_up_resolved")
+    return {
+      title: "Cleared a follow-up after a reply arrived",
+      detail:
+        "Repd matched the recorded incoming information to the open follow-up and closed it.",
+    };
+  return null;
+}
+
 export function isQuestionActive(status: string) {
   return status === "draft" || status === "asked";
 }
@@ -52,16 +130,17 @@ export function actionDependencyIsResolved(
   const condition = action.resolutionCondition;
   return Boolean(
     action.objectiveId &&
-      condition.type === "dependency_resolved" &&
-      condition.field &&
-      dependencyStatus(action.objectiveId, condition.field) === "resolved",
+    condition.type === "dependency_resolved" &&
+    condition.field &&
+    dependencyStatus(action.objectiveId, condition.field) === "resolved",
   );
 }
 
 export function reconcileDateOptionHoldState(args: {
   isSelected: boolean;
   holdRequested: boolean;
-  holdState: "not_requested" | "requested" | "granted" | "declined" | "released";
+  holdState:
+    "not_requested" | "requested" | "granted" | "declined" | "released";
 }) {
   if (
     !args.isSelected &&

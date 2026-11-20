@@ -2,14 +2,13 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowRight,
-  BriefcaseBusiness,
+  Check,
   CheckCircle2,
-  Clock3,
+  ChevronRight,
+  CircleDot,
   Plus,
-  Sparkles,
 } from "lucide-react";
 import { RetryPreparationForm } from "@/components/agent/retry-preparation-form";
-import { reevaluateWorkspace } from "@/lib/action-engine";
 import { requireContext } from "@/lib/auth";
 import {
   getWorkspaceTodayState,
@@ -20,137 +19,212 @@ function actionLabel(item: WorkspaceWorkItem) {
   if (item.action?.executionStatus === "failed") return "Retry preparation";
   if (item.action?.status === "pending_approval")
     return item.kind === "invoice" ? "Review invoice" : "Review reply";
+  if (item.kind === "hold_conflict") return "Review conflict";
   if (item.kind === "treatment_commitment") return "Decide treatment";
   if (item.kind === "producer_coordination") return "Review reply";
   return "Review next step";
 }
 
+function attentionGroup(item: WorkspaceWorkItem) {
+  if (item.rank <= 10) return "Ready for review";
+  if (item.rank <= 25) return "Decision required";
+  return "Needs attention";
+}
+
+function priorityLabel(item: WorkspaceWorkItem) {
+  if (item.state === "preparation_failed") return "Preparation failed";
+  if (item.rank <= 10) return "Review ready";
+  if (item.priority === "urgent") return "Urgent";
+  if (item.priority === "blocking") return "Blocking";
+  return "Action needed";
+}
+
 export default async function TodayPage() {
   const ctx = await requireContext();
-  await reevaluateWorkspace(ctx.workspaceId);
   const today = await getWorkspaceTodayState(ctx.workspaceId);
-  const first = ctx.user.name.split(" ")[0];
-  const backgroundCount = today.repdHandling.length + today.waiting.length;
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(new Date());
   const lead = today.attention.length
-    ? `${today.attention.length === 1 ? "One thing needs" : `${today.attention.length} things need`} you today.${backgroundCount ? ` Repd is keeping track of ${backgroundCount} other ${backgroundCount === 1 ? "item" : "items"}.` : ""}`
+    ? `${today.attention.length === 1 ? "One item needs" : `${today.attention.length} items need`} your judgment.`
     : today.jobs.length
-      ? `Nothing needs your attention right now.${backgroundCount ? ` Repd is keeping track of ${backgroundCount} ${backgroundCount === 1 ? "item" : "items"} in the background.` : ""}`
-      : "There is no active work yet. Add an inquiry and Repd will build the business brief.";
+      ? "Nothing needs your attention right now."
+      : "Add an inquiry and Repd will build the first business brief.";
+  const groupedAttention = today.attention.reduce<
+    Array<{ label: string; items: typeof today.attention }>
+  >((groups, item) => {
+    const label = attentionGroup(item);
+    const existing = groups.find((group) => group.label === label);
+    if (existing) existing.items.push(item);
+    else groups.push({ label, items: [item] });
+    return groups;
+  }, []);
 
   return (
     <div className="content today-page">
-      <section className="daily-briefing">
+      <header className="today-header">
         <div>
-          <p className="eyebrow">Today</p>
-          <h1>
-            Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {first}.
-          </h1>
-          <p>{lead}</p>
+          <p className="today-date">{dateLabel}</p>
+          <h1>Today</h1>
+          <p className="today-lead">{lead}</p>
         </div>
-        <Link href="/inquiries/new" className="button accent">
-          <Plus size={17} /> Add inquiry
+        <Link href="/inquiries/new" className="button secondary">
+          <Plus size={15} /> Add inquiry
         </Link>
-      </section>
+      </header>
 
       <main className="today-stack">
-        <section className="attention-section" aria-labelledby="attention-title">
-          <div className="compact-section-head">
+        <section
+          className="attention-section"
+          aria-labelledby="attention-title"
+        >
+          <div className="today-section-head">
             <div>
-              <p className="eyebrow">Needs you</p>
-              <h2 id="attention-title">Your decisions and reviews</h2>
+              <div className="today-section-kicker">
+                <span className="attention-marker" aria-hidden="true" />
+                <span>Needs you</span>
+                {today.attention.length > 0 && (
+                  <span className="count-badge">{today.attention.length}</span>
+                )}
+              </div>
+              <h2 id="attention-title">Decisions and reviews</h2>
             </div>
             <Link href="/actions" className="quiet-link">
-              View history <ArrowRight size={14} />
+              Action history <ArrowRight size={13} />
             </Link>
           </div>
-          {today.attention.length ? (
+
+          {groupedAttention.length ? (
             <div className="attention-list">
-              {today.attention.slice(0, 5).map((item) => (
-                <article className="attention-item" key={`${item.source}:${item.id}`}>
-                  <div className={`attention-icon ${item.state}`}>
-                    {item.state === "preparation_failed" ? (
-                      <AlertTriangle size={17} />
-                    ) : (
-                      <Sparkles size={17} />
-                    )}
-                  </div>
-                  <div className="attention-copy">
-                    <span>{item.jobTitle}</span>
-                    <h3>{item.title}</h3>
-                    <p>{item.detail}</p>
-                  </div>
-                  {item.action?.executionStatus === "failed" ? (
-                    <RetryPreparationForm actionId={item.action.id} compact />
-                  ) : (
-                    <Link className="button secondary small" href={item.href}>
-                      {actionLabel(item)}
-                    </Link>
-                  )}
-                </article>
+              {groupedAttention.map((group) => (
+                <div className="attention-group" key={group.label}>
+                  <div className="attention-group-label">{group.label}</div>
+                  {group.items.map((item) => (
+                    <article
+                      className="attention-item"
+                      key={`${item.source}:${item.id}`}
+                    >
+                      <div className={`attention-status ${item.state}`}>
+                        {item.state === "preparation_failed" ? (
+                          <AlertTriangle size={15} />
+                        ) : (
+                          <CircleDot size={15} />
+                        )}
+                      </div>
+                      <div className="attention-copy">
+                        <div className="attention-meta">
+                          <Link
+                            href={
+                              item.jobTitle === "Multiple jobs"
+                                ? item.href
+                                : `/jobs/${item.jobId}`
+                            }
+                          >
+                            {item.jobTitle}
+                          </Link>
+                          <span aria-hidden="true">·</span>
+                          <span
+                            className={`attention-priority ${item.priority}`}
+                          >
+                            {priorityLabel(item)}
+                          </span>
+                        </div>
+                        <h3>{item.title}</h3>
+                        <dl className="attention-context">
+                          <div>
+                            <dt>Why</dt>
+                            <dd>{item.detail}</dd>
+                          </div>
+                          <div>
+                            <dt>Prepared</dt>
+                            <dd>{item.prepared}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div className="attention-action">
+                        {item.action?.executionStatus === "failed" ? (
+                          <RetryPreparationForm
+                            actionId={item.action.id}
+                            compact
+                          />
+                        ) : (
+                          <Link
+                            className="button secondary small"
+                            href={item.href}
+                          >
+                            {actionLabel(item)} <ChevronRight size={13} />
+                          </Link>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
               ))}
             </div>
           ) : (
             <div className="attention-clear">
-              <CheckCircle2 size={22} />
+              <CheckCircle2 size={20} />
               <div>
-                <strong>You’re caught up.</strong>
-                <p>Repd will bring decisions and approvals here when they need you.</p>
+                <strong>
+                  {today.jobs.length
+                    ? "You’re caught up."
+                    : "No active work yet."}
+                </strong>
+                <p>
+                  {today.jobs.length
+                    ? "There are no decisions, approvals, or interventions waiting on you."
+                    : "When you add an inquiry, work that needs judgment will stay here until it is resolved."}
+                </p>
               </div>
             </div>
           )}
         </section>
 
-        {(today.repdHandling.length > 0 || today.waiting.length > 0) && (
-          <section className="background-section" aria-labelledby="background-title">
-            <div className="compact-section-head">
-              <div>
-                <p className="eyebrow">Background work</p>
-                <h2 id="background-title">Repd is keeping things moving</h2>
+        <section className="handled-section" aria-labelledby="handled-title">
+          <div className="today-section-head">
+            <div>
+              <div className="today-section-kicker quiet">
+                <Check size={14} aria-hidden="true" />
+                <span>Handled by Repd</span>
               </div>
+              <h2 id="handled-title">Meaningful work already completed</h2>
             </div>
-            <div className="background-columns">
-              {today.repdHandling.length > 0 && <div>
-                <h3><Sparkles size={15} /> Repd is handling</h3>
-                {today.repdHandling.map((item) => (
-                  <Link href={item.href} className="background-row" key={item.id}>
-                    <span>{item.jobTitle}</span><strong>{item.title}</strong>
-                  </Link>
-                ))}
-              </div>}
-              {today.waiting.length > 0 && <div>
-                <h3><Clock3 size={15} /> Waiting on others</h3>
-                {today.waiting.map((item) => (
-                  <Link href={item.href} className="background-row" key={item.id}>
-                    <span>{item.jobTitle}</span><strong>{item.title}</strong>
-                  </Link>
-                ))}
-              </div>}
+            <span className="handled-window">Past 7 days</span>
+          </div>
+          {today.handled.length ? (
+            <div className="handled-list">
+              {today.handled.map((item) => (
+                <Link
+                  href={item.href}
+                  className="handled-row"
+                  key={`${item.source}:${item.id}`}
+                >
+                  <CheckCircle2 size={15} aria-hidden="true" />
+                  <div>
+                    <div className="handled-meta">
+                      <span>{item.jobTitle}</span>
+                      <time dateTime={item.createdAt.toISOString()}>
+                        {item.createdAt.toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </time>
+                    </div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                  <ChevronRight size={14} aria-hidden="true" />
+                </Link>
+              ))}
             </div>
-          </section>
-        )}
-
-        <details className="recent-summary">
-          <summary>
-            <span><CheckCircle2 size={16} /> Recent changes</span>
-            <small>{today.recent.length ? `${today.recent.length} updates` : "No updates"}</small>
-          </summary>
-          <div className="recent-list">
-            {today.recent.map(({ activity, jobTitle }) => (
-              <div className="recent-row" key={activity.id}>
-                <span>{activity.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                <div><strong>{activity.summary}</strong><small>{jobTitle}</small></div>
-              </div>
-            ))}
-          </div>
-        </details>
-
-        {!today.jobs.length && (
-          <div className="empty card">
-            <BriefcaseBusiness />
-            <h3>No active work yet</h3>
-            <p>Paste a producer inquiry to let Repd build the brief.</p>
-          </div>
-        )}
+          ) : (
+            <p className="handled-empty">
+              No meaningful completed work to report in the past seven days.
+            </p>
+          )}
+        </section>
       </main>
     </div>
   );

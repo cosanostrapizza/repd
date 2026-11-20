@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   actions,
+  actionEvents,
   activities,
   communications,
   coordinationDateOptions,
@@ -23,7 +24,11 @@ import { bookingLabels, formatMoney, lifecycleLabels } from "@/lib/domain";
 import {
   actionAttentionRank,
   actionAttentionLabel,
+  actionDestination,
+  actionPreparedSummary,
   actionDependencyIsResolved,
+  handledActionEventPresentation,
+  handledActivityPresentation,
   isActionActive,
   isQuestionActive,
   isResolvedTreatmentDecisionAction,
@@ -47,17 +52,20 @@ export type WorkspaceWorkItem = {
   priority: Action["priority"] | "waiting";
   rank: number;
   href: string;
+  prepared: string;
   action?: Action;
 };
 
-function actionHref(action: Action) {
-  if (
-    action.jobId &&
-    ["advance_inquiry", "treatment_commitment"].includes(action.kind)
-  )
-    return `/jobs/${action.jobId}#active-work`;
-  return `/actions/${action.id}`;
-}
+export type WorkspaceHandledItem = {
+  id: string;
+  source: "activity" | "action_event";
+  jobId: string;
+  jobTitle: string;
+  title: string;
+  detail: string;
+  href: string;
+  createdAt: Date;
+};
 
 function actionResponsibility(
   action: Action,
@@ -275,7 +283,8 @@ export async function getJobWorkspaceState(
     responsibility: actionResponsibility(action),
     priority: action.priority,
     rank: actionAttentionRank(action),
-    href: actionHref(action),
+    href: actionDestination(action),
+    prepared: actionPreparedSummary(action),
     action,
   }));
   const waitingItems: WorkspaceWorkItem[] = dependencyGroups.flatMap(
@@ -298,7 +307,9 @@ export async function getJobWorkspaceState(
           responsibility: "external" as const,
           priority: "waiting" as const,
           rank: 60,
-          href: `/jobs/${jobId}#active-work`,
+          href: `/jobs/${jobId}#next-steps`,
+          prepared:
+            "Repd is tracking the dependency; no action is needed from you yet.",
         })),
   );
   const workItems = [...actionItems, ...waitingItems].sort(
@@ -518,6 +529,9 @@ export async function getWorkspaceTodayState(
       projectedWork.map((item) => [`${item.source}:${item.id}`, item]),
     ).values(),
   ].sort((a, b) => a.rank - b.rank || a.jobTitle.localeCompare(b.jobTitle));
+  const activeActionIds = new Set(
+    work.filter((item) => item.source === "action").map((item) => item.id),
+  );
   const recent = jobStates
     .flatMap((state) =>
       state.recent.map((activity) => ({ activity, jobTitle: state.job.title })),
@@ -526,6 +540,75 @@ export async function getWorkspaceTodayState(
       (a, b) => b.activity.createdAt.getTime() - a.activity.createdAt.getTime(),
     )
     .slice(0, 8);
+  const handledSince = new Date(now);
+  handledSince.setDate(handledSince.getDate() - 7);
+  const [handledActivities, handledEvents] = await Promise.all([
+    db
+      .select({ activity: activities, jobTitle: jobs.title })
+      .from(activities)
+      .innerJoin(jobs, eq(activities.jobId, jobs.id))
+      .where(
+        and(
+          eq(activities.workspaceId, workspaceId),
+          gte(activities.createdAt, handledSince),
+        ),
+      )
+      .orderBy(desc(activities.createdAt))
+      .limit(24),
+    db
+      .select({ event: actionEvents, action: actions, jobTitle: jobs.title })
+      .from(actionEvents)
+      .innerJoin(actions, eq(actionEvents.actionId, actions.id))
+      .innerJoin(jobs, eq(actions.jobId, jobs.id))
+      .where(
+        and(
+          eq(actionEvents.workspaceId, workspaceId),
+          gte(actionEvents.createdAt, handledSince),
+        ),
+      )
+      .orderBy(desc(actionEvents.createdAt))
+      .limit(24),
+  ]);
+  const handled: WorkspaceHandledItem[] = [
+    ...handledActivities.flatMap(({ activity, jobTitle }) => {
+      const presentation = handledActivityPresentation(
+        activity.type,
+        activity.summary,
+      );
+      return presentation && activity.jobId
+        ? [
+            {
+              id: activity.id,
+              source: "activity" as const,
+              jobId: activity.jobId,
+              jobTitle,
+              href: `/jobs/${activity.jobId}`,
+              createdAt: activity.createdAt,
+              ...presentation,
+            },
+          ]
+        : [];
+    }),
+    ...handledEvents.flatMap(({ event, action, jobTitle }) => {
+      if (activeActionIds.has(action.id)) return [];
+      const presentation = handledActionEventPresentation(event.type);
+      return presentation && action.jobId
+        ? [
+            {
+              id: event.id,
+              source: "action_event" as const,
+              jobId: action.jobId,
+              jobTitle,
+              href: `/jobs/${action.jobId}`,
+              createdAt: event.createdAt,
+              ...presentation,
+            },
+          ]
+        : [];
+    }),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 6);
   return {
     jobs: jobStates,
     work,
@@ -533,5 +616,6 @@ export async function getWorkspaceTodayState(
     repdHandling: work.filter((item) => item.responsibility === "repd"),
     waiting: work.filter((item) => item.responsibility === "external"),
     recent,
+    handled,
   };
 }

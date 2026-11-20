@@ -6,7 +6,7 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.getByLabel("Password").fill("creativelife");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
-    page.getByRole("heading", { name: /Good (morning|afternoon), Alex/ }),
+    page.getByRole("heading", { name: "Today", exact: true }),
   ).toBeVisible();
 }
 
@@ -33,6 +33,28 @@ test("demo workspace presents real actions and conflicts", async ({ page }) => {
   await expect(page.getByText(/Scheduling conflict/)).toBeVisible();
 });
 
+test("Today separates canonical attention from persisted handled work", async ({
+  page,
+}) => {
+  await signIn(page);
+  await expect(
+    page.getByRole("heading", { name: "Decisions and reviews" }),
+  ).toBeVisible();
+  await expect(page.getByText("Why", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("Prepared", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Meaningful work already completed" }),
+  ).toBeVisible();
+  await expect(page.getByText("Repd is handling", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByText("Waiting on others", { exact: true }),
+  ).toHaveCount(0);
+});
+
 test("desktop navigation collapses, persists, and responds to the shortcut", async ({
   page,
 }) => {
@@ -48,11 +70,10 @@ test("desktop navigation collapses, persists, and responds to the shortcut", asy
   await expect(shell).toHaveClass(/sidebar-is-collapsed/);
   await page.keyboard.press("Control+\\");
   await expect(shell).not.toHaveClass(/sidebar-is-collapsed/);
-  await page.getByRole("link", { name: "Jobs" }).click();
-  await expect(page.getByRole("link", { name: "Jobs" })).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: "Jobs", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
 });
 
 test("mobile navigation is an overlay and Contacts preserves legacy links", async ({
@@ -104,7 +125,7 @@ test("scheduling preference does not confirm or release either hold", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByRole("link", { name: "Review next step" }).click();
+  await page.getByRole("link", { name: "Review conflict" }).click();
   await expect(
     page.getByRole("heading", { name: "Which job should take priority?" }),
   ).toBeVisible();
@@ -137,6 +158,10 @@ test("scheduling preference does not confirm or release either hold", async ({
   await expect(page.locator(".detail-meta")).toContainText("1st hold");
   await page.goto("/calendar?view=agenda");
   await expect(page.getByText(/Scheduling conflict/)).toHaveCount(0);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Resolve hold conflict" }),
+  ).toHaveCount(0);
 });
 
 test("invoice edits persist and approval never issues or sends", async ({
@@ -206,7 +231,13 @@ test("one workspace cannot read another workspace job", async ({
   await page.getByLabel("Password", { exact: true }).fill("workspacepass");
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(
-    page.getByRole("heading", { name: /Good (morning|afternoon), Taylor/ }),
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("No active work yet.")).toBeVisible();
+  await expect(
+    page.getByText(
+      "No meaningful completed work to report in the past seven days.",
+    ),
   ).toBeVisible();
   await page.goto("/jobs/job_nike");
   await expect(

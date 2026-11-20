@@ -658,4 +658,8 @@ export async function transitionAction(formData: FormData) {
   });
   revalidatePath("/");
   revalidatePath("/actions");
+  revalidatePath("/jobs");
+  if (action.jobId) revalidatePath(`/jobs/${action.jobId}`);
+  const payload = action.payload as { jobIds?: string[] };
+  for (const jobId of payload.jobIds ?? []) revalidatePath(`/jobs/${jobId}`);
 }
