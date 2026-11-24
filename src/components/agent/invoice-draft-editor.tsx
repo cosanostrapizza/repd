@@ -49,18 +49,35 @@ export function InvoiceDraftEditor({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   const line = draft.lineItems[0];
+  const amount = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format((line?.amountCents ?? 0) / 100);
   return (
     <div className="invoice-editor">
-      <div className="invoice-review-status">
+      <div className="invoice-state-line">
+        <span className={`state-pill ${draft.status}`}>
+          {draft.status === "approved" ? "Approved" : "Ready for review"}
+        </span>
+        <span className="invoice-external-state">
+          <strong>Not issued or sent</strong>
+          <small>This draft has not been issued or sent.</small>
+        </span>
+      </div>
+      <div className="invoice-document" aria-label="Invoice draft summary">
         <div>
-          <span>Review state</span>
-          <strong>
-            {draft.status === "approved" ? "Approved" : "Ready for review"}
-          </strong>
+          <span>Bill to</span>
+          <strong>{draft.billingName ?? "Billing client missing"}</strong>
+          {draft.billingEmail && <small>{draft.billingEmail}</small>}
         </div>
         <div>
-          <span>External status</span>
-          <strong>Not issued or sent</strong>
+          <span>Amount</span>
+          <strong>{amount}</strong>
+          <small>{draft.paymentTerms ?? "Payment terms missing"}</small>
+        </div>
+        <div className="invoice-document-line">
+          <span>{line?.description ?? fallbackDescription}</span>
+          <strong>{amount}</strong>
         </div>
       </div>
       <form action={action} onChange={() => setDirty(true)}>

@@ -30,6 +30,7 @@ type ParticipantRow = {
   participant: {
     id: string;
     personId: string | null;
+    organizationId: string | null;
     role: string;
     displayNameSnapshot: string;
   };
@@ -534,12 +535,13 @@ export function JobRecord({
       <div className="job-record-group">
         <h3>People and organizations</h3>
         <div className="structured-objects">
-          {participants.map(({ participant, person, organization }) => (
-            <Link
-              href={person ? `/people/${person.id}` : "#"}
-              className="record-row"
-              key={participant.id}
-            >
+          {participants.map(({ participant, person, organization }) => {
+            const href = person
+              ? `/people/${person.id}`
+              : participant.organizationId
+                ? `/organizations/${participant.organizationId}`
+                : null;
+            const content = (
               <div className="person-record">
                 <span className="avatar small-avatar">
                   <UserRound size={15} />
@@ -552,8 +554,17 @@ export function JobRecord({
                   </small>
                 </span>
               </div>
-            </Link>
-          ))}
+            );
+            return href ? (
+              <Link className="record-row" href={href} key={participant.id}>
+                {content}
+              </Link>
+            ) : (
+              <div className="record-row" key={participant.id}>
+                {content}
+              </div>
+            );
+          })}
           {!participants.length && (
             <p className="compact-empty">No job participants recorded.</p>
           )}

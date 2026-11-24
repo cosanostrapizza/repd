@@ -39,6 +39,56 @@ function priorityLabel(item: WorkspaceWorkItem) {
   return "Action needed";
 }
 
+function compactContext(
+  item: WorkspaceWorkItem,
+  jobState:
+    | Awaited<ReturnType<typeof getWorkspaceTodayState>>["jobs"][number]
+    | undefined,
+) {
+  const job = jobState?.job;
+  const payload = item.action?.payload as
+    { dueDate?: string; jobIds?: string[] } | undefined;
+  const parts: string[] = [];
+  if (item.kind === "hold_conflict") {
+    parts.push(item.detail);
+  } else if (item.kind === "invoice") {
+    if (job?.feeCents)
+      parts.push(
+        new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: job.currency,
+          maximumFractionDigits: 0,
+        }).format(job.feeCents / 100),
+      );
+    if (job?.paymentTerms) parts.push(job.paymentTerms);
+  } else {
+    if (payload?.dueDate)
+      parts.push(
+        new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        }).format(new Date(`${payload.dueDate}T00:00:00Z`)),
+      );
+    else if (job?.shootDate)
+      parts.push(
+        new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        }).format(new Date(`${job.shootDate}T00:00:00Z`)),
+      );
+    else if (job?.shootStart)
+      parts.push(
+        job.shootStart.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        }),
+      );
+  }
+  return parts.join(" · ") || item.detail;
+}
+
 export default async function TodayPage() {
   const ctx = await requireContext();
   const today = await getWorkspaceTodayState(ctx.workspaceId);
@@ -61,6 +111,7 @@ export default async function TodayPage() {
     else groups.push({ label, items: [item] });
     return groups;
   }, []);
+  const jobsById = new Map(today.jobs.map((state) => [state.job.id, state]));
 
   return (
     <div className="content today-page">
@@ -115,15 +166,7 @@ export default async function TodayPage() {
                       </div>
                       <div className="attention-copy">
                         <div className="attention-meta">
-                          <Link
-                            href={
-                              item.jobTitle === "Multiple jobs"
-                                ? item.href
-                                : `/jobs/${item.jobId}`
-                            }
-                          >
-                            {item.jobTitle}
-                          </Link>
+                          <span>{item.jobTitle}</span>
                           <span aria-hidden="true">·</span>
                           <span
                             className={`attention-priority ${item.priority}`}
@@ -131,17 +174,12 @@ export default async function TodayPage() {
                             {priorityLabel(item)}
                           </span>
                         </div>
-                        <h3>{item.title}</h3>
-                        <dl className="attention-context">
-                          <div>
-                            <dt>Why</dt>
-                            <dd>{item.detail}</dd>
-                          </div>
-                          <div>
-                            <dt>Prepared</dt>
-                            <dd>{item.prepared}</dd>
-                          </div>
-                        </dl>
+                        <h3>
+                          <Link href={item.href}>{item.title}</Link>
+                        </h3>
+                        <p className="attention-context">
+                          {compactContext(item, jobsById.get(item.jobId))}
+                        </p>
                       </div>
                       <div className="attention-action">
                         {item.action?.executionStatus === "failed" ? (

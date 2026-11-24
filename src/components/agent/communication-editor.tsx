@@ -116,6 +116,11 @@ export function CommunicationEditor({
                 defaultValue={communication.toEmail ?? ""}
                 placeholder="Recipient email missing"
               />
+              {!communication.toEmail && (
+                <small className="field-issue" role="alert">
+                  Add the recipient email before approval or handoff.
+                </small>
+              )}
             </label>
             <label>
               <span>Subject</span>
@@ -126,11 +131,12 @@ export function CommunicationEditor({
               />
             </label>
           </div>
-          <div className="field">
-            <label htmlFor="body">Draft</label>
+          <div className="field message-field">
+            <label htmlFor="body">Message</label>
             <textarea
               id="body"
               name="body"
+              aria-label="Draft"
               rows={10}
               defaultValue={communication.body}
             />

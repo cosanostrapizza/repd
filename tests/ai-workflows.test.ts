@@ -83,7 +83,7 @@ describe("structured AI boundaries", () => {
       condition: "the promised deck arrives tomorrow and can be reviewed",
     });
     expect(sentence).toBe(
-      "I can meet the November 23 treatment deadline provided that the promised deck arrives tomorrow and can be reviewed.",
+      "I can meet the November 23 treatment deadline provided that the deck arrives tomorrow, with enough time for me to review it.",
     );
     expect(
       communicationPreservesTreatmentDecision(
@@ -92,6 +92,16 @@ describe("structured AI boundaries", () => {
         "the promised deck arrives tomorrow and can be reviewed",
       ),
     ).toBe(true);
+  });
+  it("formats stored ISO deadlines naturally in prepared communication", () => {
+    expect(
+      treatmentCommitmentSentence({
+        decision: "need_deck_first",
+        dueDate: "2026-11-23",
+      }),
+    ).toBe(
+      "I need to review the promised deck before I can commit to the November 23, 2026 treatment deadline.",
+    );
   });
   it("accepts a complete source-backed extraction", () => {
     const parsed = inquiryExtractionSchema.parse({

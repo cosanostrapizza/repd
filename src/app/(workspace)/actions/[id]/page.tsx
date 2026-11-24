@@ -3,6 +3,7 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { CommunicationEditor } from "@/components/agent/communication-editor";
 import { InvoiceDraftEditor } from "@/components/agent/invoice-draft-editor";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { db } from "@/db/client";
 import {
   actions,
@@ -47,10 +48,6 @@ export default async function ActionWorkspace({
     action.kind === "invoice" && action.status !== "open"
       ? "Review invoice draft"
       : action.title;
-  const pageExplanation =
-    action.kind === "invoice" && action.status !== "open"
-      ? "Repd prepared this internal invoice draft from the recorded job terms. Review its actual contents below; it has not been issued or sent."
-      : action.explanation;
   const header = (
     <header
       className="detail-head"
@@ -61,22 +58,18 @@ export default async function ActionWorkspace({
       <div className="detail-head-inner">
         <div className="action-workspace-head">
           <div>
-            <p className="eyebrow">
-              Prepared work · {action.kind.replaceAll("_", " ")}
-            </p>
             <h1>{pageTitle}</h1>
-            <p className="lede">{pageExplanation}</p>
+            {job && (
+              <p className="review-job-context">
+                <Link href={`/jobs/${job.id}`}>{job.title}</Link>
+                {person?.name ? ` · ${person.name}` : ""}
+              </p>
+            )}
           </div>
           <div>
-            <span className={`badge ${action.priority}`}>
-              {action.status.replaceAll("_", " ")}
-            </span>
             {job && (
-              <Link
-                href={`/jobs/${job.id}#next-steps`}
-                className="button ghost"
-              >
-                View {job.title} →
+              <Link href={`/jobs/${job.id}#next-steps`} className="quiet-link">
+                Back to job →
               </Link>
             )}
           </div>
@@ -165,31 +158,20 @@ export default async function ActionWorkspace({
     return (
       <>
         {header}
-        <div className="content">
-          <section className="context-strip">
-            <div>
-              <span>Job</span>
-              <strong>{job?.title ?? "Workspace"}</strong>
-            </div>
-            <div>
-              <span>Recipient</span>
-              <strong>{person?.name ?? "Producer not identified"}</strong>
-            </div>
-            <div>
-              <span>Email</span>
-              <strong>
-                {communication?.toEmail ?? person?.email ?? "Missing"}
-              </strong>
-            </div>
-            <div>
-              <span>External status</span>
-              <strong>
-                {communication?.status === "sent"
-                  ? "User confirmed sent"
-                  : "Not confirmed sent"}
-              </strong>
-            </div>
-          </section>
+        <div className="content review-content">
+          <div className="review-recipient-line">
+            <span>To</span>
+            <strong>{person?.name ?? "Producer not identified"}</strong>
+            <span aria-hidden="true">·</span>
+            <span>
+              {communication?.toEmail ?? person?.email ?? "Email missing"}
+            </span>
+            <span className={`state-pill ${communication?.status ?? "draft"}`}>
+              {communication?.status === "sent"
+                ? "Sent confirmed"
+                : (communication?.status ?? "draft").replaceAll("_", " ")}
+            </span>
+          </div>
           {(treatmentPayload.treatmentCondition ||
             dependencyValue?.dueDate) && (
             <section
@@ -220,14 +202,6 @@ export default async function ActionWorkspace({
               </div>
             </section>
           )}
-          <section className="card card-pad recommendation">
-            <p className="eyebrow">Repd’s recommendation</p>
-            <h2>{action.recommendation}</h2>
-            <p>
-              Approval records your decision only. Copying or opening the draft
-              does not prove delivery.
-            </p>
-          </section>
           {communication ? (
             <CommunicationEditor
               communication={communication}
@@ -246,23 +220,35 @@ export default async function ActionWorkspace({
               </p>
             </section>
           )}
-          {evidence.length > 0 && (
-            <section className="card card-pad section">
-              <p className="eyebrow">Supporting evidence</p>
-              <h2>Sources Repd used</h2>
-              {evidence.map((source) => (
-                <details className="source-document" key={source.id}>
-                  <summary>
-                    {source.subject ?? source.type.replaceAll("_", " ")} ·{" "}
-                    {source.capturedAt.toLocaleDateString()}
-                  </summary>
-                  <pre>
-                    {source.content ?? "Source content is not available."}
-                  </pre>
-                </details>
-              ))}
-            </section>
-          )}
+          <details className="review-supporting-details">
+            <summary>Reasoning and supporting evidence</summary>
+            <div className="review-supporting-body">
+              <div>
+                <strong>Why this reply</strong>
+                <p>{action.recommendation}</p>
+                <p className="muted">
+                  Approval records your decision only. Opening or copying the
+                  draft does not prove delivery.
+                </p>
+              </div>
+              {evidence.length > 0 && (
+                <div className="review-evidence">
+                  <strong>Sources Repd used</strong>
+                  {evidence.map((source) => (
+                    <details className="source-document" key={source.id}>
+                      <summary>
+                        {source.subject ?? source.type.replaceAll("_", " ")} ·{" "}
+                        {source.capturedAt.toLocaleDateString()}
+                      </summary>
+                      <pre>
+                        {source.content ?? "Source content is not available."}
+                      </pre>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </div>
       </>
     );
@@ -319,114 +305,107 @@ export default async function ActionWorkspace({
     return (
       <>
         {header}
-        <div className="content">
-          <div className="decision-grid">
-            <main>
-              <section className="card card-pad section">
-                <p className="eyebrow">Scheduling decision</p>
+        <div className="content review-content">
+          <section className="hold-comparison-section">
+            <div className="hold-comparison-heading">
+              <div>
                 <h2>Which job should take priority?</h2>
                 <p>
-                  Record a scheduling preference without confirming a booking or
-                  releasing either hold.
+                  Compare competing holds, choose a preference, or explicitly
+                  release one.
                 </p>
-                {cards.map((item) => (
-                  <article
-                    className={`hold-decision ${conflictPayload.preferenceHoldId === item.hold.id ? "preferred" : ""}`}
-                    key={item.hold.id}
-                  >
-                    <div>
-                      <span className={`hold-rank ${item.hold.kind}`}>
-                        {item.hold.kind === "confirmed"
-                          ? "Confirmed"
-                          : `${item.hold.kind} hold`}
+              </div>
+              <span className="trust-note">
+                A preference changes no booking.
+              </span>
+            </div>
+            <div className="hold-comparison-grid">
+              {cards.map((item) => (
+                <article
+                  className={`hold-decision ${conflictPayload.preferenceHoldId === item.hold.id ? "preferred" : ""}`}
+                  key={item.hold.id}
+                >
+                  <div>
+                    <span className={`hold-rank ${item.hold.kind}`}>
+                      {item.hold.kind === "confirmed"
+                        ? "Confirmed"
+                        : `${item.hold.kind} hold`}
+                    </span>
+                    <h3>{item.job.title}</h3>
+                    <p className="hold-dates">
+                      {item.hold.startsAt.toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}{" "}
+                      –{" "}
+                      {item.hold.endsAt.toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </p>
+                    <dl className="hold-facts">
+                      <div>
+                        <dt>Fee</dt>
+                        <dd>
+                          {formatMoney(item.job.feeCents, item.job.currency)}{" "}
+                          <small>{item.job.feeState}</small>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Booking</dt>
+                        <dd>{bookingLabels[item.job.bookingStatus]}</dd>
+                      </div>
+                    </dl>
+                    {conflictPayload.preferenceHoldId === item.hold.id && (
+                      <span className="preference-note">
+                        Current priority preference
                       </span>
-                      <h3>{item.job.title}</h3>
-                      <p>
-                        {item.hold.startsAt.toLocaleDateString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                        })}{" "}
-                        –{" "}
-                        {item.hold.endsAt.toLocaleDateString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </p>
-                      <p>
-                        {item.job.feeState === "confirmed"
-                          ? "Agreed"
-                          : "Proposed"}{" "}
-                        fee {formatMoney(item.job.feeCents, item.job.currency)}
-                      </p>
-                      <p>
-                        Booking status: {bookingLabels[item.job.bookingStatus]}
-                      </p>
-                      {conflictPayload.preferenceHoldId === item.hold.id && (
-                        <span className="preference-note">
-                          Current priority preference
-                        </span>
-                      )}
-                    </div>
-                    <div className="action-controls conflict-actions">
-                      <form action={recordHoldPreference}>
-                        <input
-                          type="hidden"
-                          name="actionId"
-                          value={action.id}
-                        />
-                        <input
-                          type="hidden"
-                          name="holdId"
-                          value={item.hold.id}
-                        />
-                        <button
-                          className="button small"
-                          disabled={
-                            conflictPayload.preferenceHoldId === item.hold.id
-                          }
-                        >
-                          {conflictPayload.preferenceHoldId === item.hold.id
-                            ? "Priority recorded"
-                            : `Prefer ${item.job.title}`}
-                        </button>
-                      </form>
-                      <form action={transitionHold}>
-                        <input
-                          type="hidden"
-                          name="holdId"
-                          value={item.hold.id}
-                        />
-                        <button
-                          className="button secondary small"
-                          name="transition"
-                          value="release"
-                        >
-                          Release this hold
-                        </button>
-                      </form>
-                    </div>
-                  </article>
-                ))}
-                <p className="trust-note">
-                  A preference is internal. Confirming a booking requires actual
-                  producer confirmation or an explicit booking record.
-                </p>
-              </section>
-            </main>
-            <aside>
-              <section className="card card-pad recommendation">
-                <p className="eyebrow">Repd’s assessment</p>
-                <h2>{action.recommendation}</h2>
-                <p>
-                  Compare rank, certainty, fee, dates, and producer
-                  relationship. Repd will never release a hold without your
-                  explicit choice.
-                </p>
-              </section>
-            </aside>
-          </div>
+                    )}
+                  </div>
+                  <div className="action-controls conflict-actions">
+                    <form action={recordHoldPreference}>
+                      <input type="hidden" name="actionId" value={action.id} />
+                      <input type="hidden" name="holdId" value={item.hold.id} />
+                      <button
+                        className="button small"
+                        disabled={
+                          conflictPayload.preferenceHoldId === item.hold.id
+                        }
+                      >
+                        {conflictPayload.preferenceHoldId === item.hold.id
+                          ? "Priority recorded"
+                          : `Prefer ${item.job.title}`}
+                      </button>
+                    </form>
+                    <form action={transitionHold}>
+                      <input type="hidden" name="holdId" value={item.hold.id} />
+                      <ConfirmSubmitButton
+                        className="button secondary small"
+                        name="transition"
+                        value="release"
+                        confirmation={`Release the hold for ${item.job.title}? This updates the job's booking status.`}
+                      >
+                        Release this hold
+                      </ConfirmSubmitButton>
+                    </form>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <p className="trust-note">
+              No booking has been confirmed by recording a preference.
+              Confirming still requires producer confirmation or an explicit
+              booking record; releasing a hold requires confirmation.
+            </p>
+          </section>
+          <details className="review-supporting-details">
+            <summary>Repd’s assessment</summary>
+            <div className="review-supporting-body">
+              <p>{action.recommendation}</p>
+            </div>
+          </details>
         </div>
       </>
     );
@@ -448,54 +427,73 @@ export default async function ActionWorkspace({
       !job.paymentTerms && "payment terms",
       !job.clientOrganizationId && "billing client",
     ].filter(Boolean);
+    const evidence = await db
+      .select()
+      .from(sources)
+      .where(
+        and(
+          eq(sources.jobId, job.id),
+          eq(sources.workspaceId, ctx.workspaceId),
+        ),
+      )
+      .orderBy(desc(sources.capturedAt))
+      .limit(3);
     return (
       <>
         {header}
-        <div className="content">
-          <div className="decision-grid">
-            <main>
-              <section className="card card-pad">
-                <p className="eyebrow">Invoice review</p>
-                <h2>{job.title}</h2>
-                {missing.length > 0 ? (
-                  <div className="form-message error">
-                    Missing before a complete invoice: {missing.join(", ")}.
-                  </div>
-                ) : (
-                  <p className="trust-note">
-                    This prepares an internal invoice draft only. It does not
-                    assign an invoice number, send a bill, or record payment.
-                  </p>
-                )}
-                {!draft && (
-                  <form action={prepareInvoice}>
-                    <input type="hidden" name="actionId" value={action.id} />
-                    <button className="button" disabled={missing.length > 0}>
-                      Prepare invoice draft
-                    </button>
-                  </form>
-                )}
-                {draft && (
-                  <InvoiceDraftEditor
-                    draft={draft}
-                    fallbackDescription={`Creative fee — ${job.title}`}
-                    currency={job.currency}
-                    actionId={action.id}
-                  />
-                )}
-              </section>
-            </main>
-            <aside>
-              <section className="card card-pad recommendation">
-                <p className="eyebrow">Repd’s recommendation</p>
-                <h2>{action.recommendation}</h2>
-                <p>
-                  Review the source fee and client billing details before
-                  exporting to an invoicing provider.
-                </p>
-              </section>
-            </aside>
-          </div>
+        <div className="content review-content">
+          <section className="card card-pad invoice-review-card">
+            {missing.length > 0 ? (
+              <div className="form-message error">
+                Missing before a complete invoice: {missing.join(", ")}.
+              </div>
+            ) : (
+              <p className="trust-note">
+                Internal draft · not numbered, issued, sent, or paid.
+              </p>
+            )}
+            {!draft && (
+              <form action={prepareInvoice}>
+                <input type="hidden" name="actionId" value={action.id} />
+                <button className="button" disabled={missing.length > 0}>
+                  Prepare invoice draft
+                </button>
+              </form>
+            )}
+            {draft && (
+              <InvoiceDraftEditor
+                draft={draft}
+                fallbackDescription={`Creative fee — ${job.title}`}
+                currency={job.currency}
+                actionId={action.id}
+              />
+            )}
+          </section>
+          <details className="review-supporting-details">
+            <summary>Reasoning and supporting evidence</summary>
+            <div className="review-supporting-body">
+              <div>
+                <strong>Why this draft</strong>
+                <p>{action.recommendation}</p>
+              </div>
+              {evidence.length > 0 && (
+                <div className="review-evidence">
+                  <strong>Recent job sources</strong>
+                  {evidence.map((source) => (
+                    <details className="source-document" key={source.id}>
+                      <summary>
+                        {source.subject ?? source.type.replaceAll("_", " ")} ·{" "}
+                        {source.capturedAt.toLocaleDateString()}
+                      </summary>
+                      <pre>
+                        {source.content ?? "Source content is not available."}
+                      </pre>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </div>
       </>
     );

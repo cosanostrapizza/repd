@@ -1823,6 +1823,220 @@ textarea {
 .manager-note .eyebrow {
   color: var(--accent);
 }
+/* Dense decision and review surfaces */
+.review-content {
+  display: grid;
+  gap: 14px;
+  max-width: 1040px;
+}
+.review-job-context {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.review-job-context a {
+  color: var(--ink);
+  font-weight: 700;
+}
+.review-recipient-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.review-recipient-line > span:first-child {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.review-recipient-line strong {
+  color: var(--ink);
+}
+.review-recipient-line .state-pill {
+  margin-left: auto;
+}
+.review-content .review-commitments {
+  margin: 0;
+}
+.review-supporting-details {
+  border-top: 1px solid var(--line);
+}
+.review-supporting-details > summary {
+  cursor: pointer;
+  padding: 14px 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.review-supporting-body {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 24px;
+  padding: 0 2px 18px;
+  font-size: 13px;
+}
+.review-supporting-body p {
+  line-height: 1.55;
+}
+.review-evidence {
+  display: grid;
+  gap: 8px;
+}
+.field-issue {
+  display: block;
+  margin-top: 5px;
+  color: var(--terracotta);
+  font-size: 11px;
+  font-weight: 700;
+}
+.message-field textarea {
+  min-height: 220px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.invoice-review-card {
+  padding: clamp(18px, 3vw, 32px);
+}
+.invoice-state-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.invoice-external-state {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+.invoice-external-state small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.invoice-document {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px 32px;
+  margin: 10px 0 24px;
+  padding: 22px 0;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.invoice-document > div {
+  display: grid;
+  gap: 4px;
+}
+.invoice-document > div:nth-child(2) {
+  text-align: right;
+}
+.invoice-document span,
+.invoice-document small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.invoice-document > div > strong {
+  font-size: 18px;
+}
+.invoice-document-line {
+  grid-column: 1 / -1;
+  display: flex !important;
+  justify-content: space-between;
+  gap: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.hold-comparison-section {
+  display: grid;
+  gap: 14px;
+}
+.hold-comparison-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+.hold-comparison-heading h2,
+.hold-comparison-heading p {
+  margin: 0;
+}
+.hold-comparison-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.hold-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.hold-comparison-grid .hold-decision {
+  display: grid;
+  align-content: space-between;
+  gap: 22px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.hold-comparison-grid .hold-decision.preferred {
+  border-color: #8eaa7b;
+  box-shadow: inset 0 3px 0 #8eaa7b;
+}
+.hold-decision h3 {
+  margin: 7px 0 4px;
+  font-size: 20px;
+}
+.hold-dates {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.hold-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+}
+.hold-facts div {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.hold-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.hold-facts dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+}
+.hold-facts small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.jobs-list-head {
+  background: #f8f9f4;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.jobs-list .list-row {
+  min-height: 64px;
+}
+.jobs-list .list-label {
+  display: block;
+  margin-top: 3px;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     display: block;
@@ -2879,6 +3093,65 @@ html.agent-panel-wide .app-shell {
   }
   .fact-row:last-child {
     border-bottom: 0;
+  }
+}
+
+/* Final workflow-density refinements */
+.attention-context {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.attention-copy h3 a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.attention-item {
+  position: relative;
+  padding-block: 13px;
+}
+.attention-action,
+.attention-item form,
+.attention-item button,
+.attention-item .button {
+  position: relative;
+  z-index: 1;
+}
+.review-content {
+  padding-top: 18px;
+}
+.review-content .communication-title .eyebrow {
+  margin-bottom: 2px;
+}
+.review-content .communication-title h2 {
+  font-size: 20px;
+}
+.review-content .approval-bar {
+  bottom: 10px;
+  padding: 14px 16px;
+}
+
+@media (max-width: 700px) {
+  .review-supporting-body,
+  .hold-comparison-grid {
+    grid-template-columns: 1fr;
+  }
+  .review-recipient-line,
+  .hold-comparison-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .review-recipient-line .state-pill {
+    margin-left: 0;
+  }
+  .invoice-document {
+    grid-template-columns: 1fr;
+  }
+  .invoice-document > div:nth-child(2) {
+    text-align: left;
   }
 }
 @media (max-width: 600px) {

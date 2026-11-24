@@ -2,11 +2,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { requireContext } from "@/lib/auth";
 import { reevaluateWorkspace } from "@/lib/action-engine";
-import {
-  bookingLabels,
-  formatMoney,
-  lifecycleLabels,
-} from "@/lib/domain";
+import { bookingLabels, formatMoney, lifecycleLabels } from "@/lib/domain";
 import { getWorkspaceTodayState } from "@/lib/workspace-state";
 
 export const metadata = { title: "Jobs" };
@@ -18,11 +14,9 @@ export default async function JobsPage() {
     <div className="content">
       <div className="page-head">
         <div>
-          <p className="eyebrow">Your work</p>
           <h1>Jobs</h1>
           <p className="muted">
-            One evolving brief for every inquiry, hold, booking, and completed
-            job.
+            {rows.length} active {rows.length === 1 ? "job" : "jobs"}
           </p>
         </div>
         <div className="job-head-actions">
@@ -35,17 +29,8 @@ export default async function JobsPage() {
           </Link>
         </div>
       </div>
-      <div className="card list">
-        <div
-          className="list-row"
-          style={{
-            background: "#f8f9f4",
-            fontSize: 11,
-            textTransform: "uppercase",
-            letterSpacing: ".08em",
-            color: "var(--muted)",
-          }}
-        >
+      <div className="card list jobs-list">
+        <div className="list-row jobs-list-head">
           <div>Job</div>
           <div>Status</div>
           <div>Fee</div>
@@ -55,7 +40,7 @@ export default async function JobsPage() {
           <Link className="list-row" href={`/jobs/${job.id}`} key={job.id}>
             <div>
               <strong>{job.title}</strong>
-              <span className="list-label" style={{ marginTop: 5 }}>
+              <span className="list-label">
                 {client ?? "Client not set"}
                 {job.shootStart
                   ? ` · ${job.shootStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
@@ -68,7 +53,7 @@ export default async function JobsPage() {
               >
                 {bookingLabels[job.bookingStatus]}
               </span>
-              <span className="list-label" style={{ marginTop: 5 }}>
+              <span className="list-label">
                 {lifecycleLabels[job.lifecycleStatus]}
               </span>
             </div>

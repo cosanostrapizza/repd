@@ -1,15 +1,38 @@
 export type TreatmentDecision =
   "commit_after_deck" | "need_deck_first" | "cannot_commit";
 
+function naturalDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+}
+
+function naturalCondition(value: string) {
+  return value
+    .replace(
+      /^the promised deck arrives tomorrow and can be reviewed$/i,
+      "the promised deck arrives tomorrow, with enough time for me to review it",
+    )
+    .replace(/^the promised deck /i, "the deck ");
+}
+
 export function treatmentCommitmentSentence(args: {
   decision: TreatmentDecision;
   dueDate?: string | null;
   condition?: string | null;
 }) {
   const deadline = args.dueDate
-    ? `the ${args.dueDate} treatment deadline`
+    ? `the ${naturalDate(args.dueDate)} treatment deadline`
     : "the requested treatment deadline";
-  const condition = args.condition?.trim().replace(/[.!?]+$/, "");
+  const condition = args.condition
+    ? naturalCondition(args.condition.trim().replace(/[.!?]+$/, ""))
+    : null;
   if (args.decision === "commit_after_deck")
     return condition
       ? `I can meet ${deadline} provided that ${condition}.`

@@ -40,10 +40,8 @@ test("Today separates canonical attention from persisted handled work", async ({
   await expect(
     page.getByRole("heading", { name: "Decisions and reviews" }),
   ).toBeVisible();
-  await expect(page.getByText("Why", { exact: true }).first()).toBeVisible();
-  await expect(
-    page.getByText("Prepared", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Why", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Prepared", { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "Meaningful work already completed" }),
   ).toBeVisible();
@@ -221,6 +219,7 @@ test("scheduling preference does not confirm or release either hold", async ({
   await page.goto("/calendar?view=agenda");
   await expect(page.getByText("Priority preference")).toBeVisible();
   await page.getByRole("link", { name: "Review conflict" }).first().click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page
     .locator(".hold-decision")
     .filter({ hasText: "Vogue New Voices" })
@@ -453,6 +452,11 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
       .first(),
   ).toBeVisible();
   await expect(
+    page
+      .locator('a.record-row[href^="/organizations/"]')
+      .filter({ hasText: "Wieden+Kennedy" }),
+  ).toBeVisible();
+  await expect(
     page.getByRole("link", { name: "Review reply" }).last(),
   ).toBeVisible();
   await expect(page.getByLabel("Draft")).toHaveCount(0);
@@ -478,7 +482,7 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   await page.getByRole("button", { name: "Approve draft" }).click();
   await expect(page.getByText("Approved for handoff").first()).toBeVisible();
   await page.getByRole("button", { name: "I sent it" }).click();
-  await page.getByRole("link", { name: /View New Balance Campaign/ }).click();
+  await page.getByRole("link", { name: "Back to job →" }).click();
   await expect(
     page.getByRole("heading", { name: /Waiting on others/ }),
   ).toBeVisible();
@@ -588,7 +592,7 @@ test("a New Balance inquiry becomes one coordinated decision workflow", async ({
   ).toBeVisible();
   await expect(page.getByText(/“Tomorrow” was anchored to/)).toBeVisible();
   await expect(page.getByLabel("Draft")).toContainText(
-    "I can meet the 2026-11-23 treatment deadline provided that the promised deck arrives tomorrow and can be reviewed.",
+    "I can meet the November 23, 2026 treatment deadline provided that the deck arrives tomorrow, with enough time for me to review it.",
   );
   await expect(page.getByLabel("Draft")).toContainText(
     "does not confirm the booking",
